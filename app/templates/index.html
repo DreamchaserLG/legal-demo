@@ -1,0 +1,58 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ app_name }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div class="container">
+    <h1>{{ app_name }}</h1>
+    <p class="subtitle">输入关键词后，系统会聚合 OFAC 和 CanLII 数据并在结果页展示。</p>
+
+    <div class="card">
+        <form method="post" action="/search">
+            <label for="keywords">关键词</label>
+            <input
+                type="text"
+                id="keywords"
+                name="keywords"
+                placeholder="例如: inheritance, contract, sanction"
+                required
+            />
+
+            <div class="row">
+                <div class="field">
+                    <label for="limit">结果数量</label>
+                    <input type="number" id="limit" name="limit" value="30" min="1" max="100" />
+                </div>
+                <div class="field">
+                    <label for="source">数据源</label>
+                    <select id="source" name="source">
+                        <option value="all">全部</option>
+                        <option value="ofac">OFAC</option>
+                        <option value="canlii">CanLII</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="sort">排序</label>
+                    <select id="sort" name="sort">
+                        <option value="relevance">相关度优先</option>
+                        <option value="recent">时间优先</option>
+                    </select>
+                </div>
+            </div>
+            <input type="hidden" name="offset" value="0" />
+
+            <label class="checkbox">
+                <input type="checkbox" name="sync_first" checked />
+                检索前先执行数据同步
+            </label>
+
+            <button type="submit">开始检索</button>
+        </form>
+    </div>
+</div>
+</body>
+</html>
