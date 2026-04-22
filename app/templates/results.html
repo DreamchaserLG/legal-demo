@@ -1,201 +1,99 @@
-﻿<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{{ app_name }} - Results</title>
-    <link rel="stylesheet" href="/static/style.css" />
-</head>
-<body>
-<div class="container">
-    <h1>{{ app_name }}</h1>
-    <p><a href="/">返回首页</a></p>
+﻿{% extends "base.html" %}
 
-    <div class="card">
-        <h2>查询信息</h2>
-        <p><strong>关键词:</strong> {{ keywords_input }}</p>
-        <p><strong>解析后:</strong> {{ keywords | join(', ') }}</p>
-        <p><strong>数据源:</strong> {{ source }}</p>
-        <p><strong>排序:</strong> {{ "相关度优先" if sort == "relevance" else "时间优先" }}</p>
-        <p><strong>偏移:</strong> {{ offset }}</p>
-        <p><strong>当前页数量:</strong> {{ page_count }}</p>
-        <p><strong>命中总数:</strong> {{ total }}</p>
-        <p>
-            <strong>分组:</strong>
-            OFAC={{ source_counts.ofac }},
-            CanLII={{ source_counts.canlii }},
-            Other={{ source_counts.other }}
-        </p>
-        <div class="pager">
+{% block title %}{{ app_name }} | 检索结果{% endblock %}
+
+{% block content %}
+<section class="hero hero-results">
+    <div class="shell hero-grid detail-grid">
+        <div class="hero-copy">
+            <p class="eyebrow">Search Results</p>
+            <h1>{{ keywords_input or "输入关键词开始检索" }}</h1>
+            <p class="hero-text">
+                {% if keywords %}
+                已拆分关键词：{{ keywords | join(" / ") }}
+                {% else %}
+                当前还没有有效关键词。
+                {% endif %}
+            </p>
+        </div>
+
+        <form class="tool-panel compact" method="get" action="/results" data-loading-mode="search">
+            <label for="keywords">关键词</label>
+            <input type="text" id="keywords" name="keywords" value="{{ keywords_input }}" placeholder="inheritance, contract, sanctions" />
+            <div class="form-grid">
+                <div>
+                    <label for="limit">结果数</label>
+                    <input type="number" id="limit" name="limit" value="{{ limit }}" min="1" max="100" />
+                </div>
+                <div>
+                    <label for="source">数据源</label>
+                    <select id="source" name="source">
+                        <option value="all" {% if source == "all" %}selected{% endif %}>全部</option>
+                        <option value="canlii" {% if source == "canlii" %}selected{% endif %}>CanLII</option>
+                        <option value="ofac" {% if source == "ofac" %}selected{% endif %}>OFAC</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="sort">排序</label>
+                    <select id="sort" name="sort">
+                        <option value="relevance" {% if sort == "relevance" %}selected{% endif %}>相关度优先</option>
+                        <option value="recent" {% if sort == "recent" %}selected{% endif %}>时间优先</option>
+                    </select>
+                </div>
+            </div>
+            <input type="hidden" name="offset" value="0" />
+            <div class="action-row">
+                <button type="submit">更新结果</button>
+            </div>
+        </form>
+    </div>
+</section>
+
+<section class="band">
+    <div class="shell">
+        <div class="stat-strip">
+            <article class="stat-box">
+                <span>{{ total }}</span>
+                <small>命中总数</small>
+            </article>
+            <article class="stat-box">
+                <span>{{ page_count }}</span>
+                <small>当前页条目</small>
+            </article>
+            <article class="stat-box">
+                <span>{{ source_counts.canlii }}</span>
+                <small>CanLII</small>
+            </article>
+            <article class="stat-box">
+                <span>{{ source_counts.ofac }}</span>
+                <small>OFAC</small>
+            </article>
+        </div>
+        <div class="pager-row">
             {% if has_previous %}
-            <a class="pager-link" href="/results?keywords={{ keywords_input|urlencode }}&sync_first=&limit={{ limit }}&offset={{ previous_offset }}&source={{ source }}&sort={{ sort }}">上一页</a>
+            <a class="pager-link" href="/results?keywords={{ keywords_input|urlencode }}&limit={{ limit }}&offset={{ previous_offset }}&source={{ source }}&sort={{ sort }}">上一页</a>
             {% endif %}
             {% if has_next %}
-            <a class="pager-link" href="/results?keywords={{ keywords_input|urlencode }}&sync_first=&limit={{ limit }}&offset={{ next_offset }}&source={{ source }}&sort={{ sort }}">下一页</a>
+            <a class="pager-link" href="/results?keywords={{ keywords_input|urlencode }}&limit={{ limit }}&offset={{ next_offset }}&source={{ source }}&sort={{ sort }}">下一页</a>
             {% endif %}
         </div>
-    </div>
-
-    {% if sync_info and sync_info.sources %}
-    <div class="card">
-        <h2>同步结果</h2>
-        <div class="sync-grid">
-            {% for source_name, info in sync_info.sources.items() %}
-            <div class="sync-item">
-                <h3>{{ source_name|upper }}</h3>
-                <p><strong>状态:</strong> {{ info["status"] if "status" in info else "-" }}</p>
-
-                {% if "processed" in info %}
-                <p><strong>处理条数:</strong> {{ info["processed"] }}</p>
-                {% endif %}
-
-                {% if "items" in info %}
-                <p><strong>项目数:</strong> {{ info["items"] }}</p>
-                {% endif %}
-
-                {% if "error_type" in info and info["error_type"] %}
-                <p><strong>错误类型:</strong> {{ info["error_type"] }}</p>
-                {% endif %}
-
-                {% if "message" in info and info["message"] %}
-                <p><strong>说明:</strong> {{ info["message"] }}</p>
-                {% endif %}
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
-    {% if grouped_results.canlii %}
-    <div class="section-title">CanLII 案例结果 ({{ grouped_results.canlii|length }})</div>
-    {% for item in grouped_results.canlii %}
-    <div class="card result-card">
-        <div class="badge">{{ item.source_label }}</div>
-        <h2>{{ item.title }}</h2>
-
-        {% if item.subtitle %}
-        <p class="muted">{{ item.subtitle }}</p>
-        {% endif %}
-
-        <div class="meta-list">
-            <span class="chip">相关度 {{ item.score }}</span>
-            <span class="chip">时间 {{ item.published_at }}</span>
-        </div>
-
-        {% if item.fields %}
-        <div class="field-grid">
-            {% for label, value in item.fields %}
-            <div class="field-row">
-                <span class="field-label">{{ label }}</span>
-                <span class="field-value">{{ value }}</span>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        {% if item.summary %}
-        <p><strong>摘要:</strong> {{ item.summary }}</p>
-        {% endif %}
-
-        {% if item.excerpt %}
-        <details>
-            <summary>查看正文片段</summary>
-            <div class="detail-box">{{ item.excerpt }}</div>
-        </details>
-        {% endif %}
-
-        {% if item.url %}
-        <p><a href="{{ item.url }}" target="_blank">打开原始链接</a></p>
+        {% if remote_fetch and remote_fetch.status != "local_only" and remote_fetch.message %}
+        <p class="notice-text">{{ remote_fetch.message }}</p>
         {% endif %}
     </div>
-    {% endfor %}
-    {% endif %}
+</section>
 
-    {% if grouped_results.ofac %}
-    <div class="section-title">OFAC 制裁名单结果 ({{ grouped_results.ofac|length }})</div>
-    {% for item in grouped_results.ofac %}
-    <div class="card result-card">
-        <div class="badge">{{ item.source_label }}</div>
-        <h2>{{ item.title }}</h2>
+{% include "partials/task_banner.html" %}
 
-        {% if item.subtitle %}
-        <p class="muted">{{ item.subtitle }}</p>
-        {% endif %}
+{% include "partials/search_sections.html" %}
 
-        <div class="meta-list">
-            <span class="chip">相关度 {{ item.score }}</span>
-        </div>
-
-        {% if item.fields %}
-        <div class="field-grid">
-            {% for label, value in item.fields %}
-            <div class="field-row">
-                <span class="field-label">{{ label }}</span>
-                <span class="field-value">{{ value }}</span>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        {% if item.summary %}
-        <p><strong>备注摘要:</strong> {{ item.summary }}</p>
-        {% endif %}
-
-        {% if item.aliases %}
-        <details>
-            <summary>查看别名 ({{ item.aliases|length }})</summary>
-            <div class="detail-box">
-                <ul class="detail-list">
-                    {% for alias in item.aliases %}
-                    <li>
-                        <strong>{{ alias.type or 'alias' }}</strong>: {{ alias.name }}
-                        {% if alias.remarks %} ({{ alias.remarks }}) {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-            </div>
-        </details>
-        {% endif %}
-
-        {% if item.addresses %}
-        <details>
-            <summary>查看地址 ({{ item.addresses|length }})</summary>
-            <div class="detail-box">
-                <ul class="detail-list">
-                    {% for addr in item.addresses %}
-                    <li>{{ addr.display }}</li>
-                    {% endfor %}
-                </ul>
-            </div>
-        </details>
-        {% endif %}
-
-        {% if item.url %}
-        <p><a href="{{ item.url }}" target="_blank">查看 OFAC 来源页面</a></p>
-        {% endif %}
+{% if total == 0 %}
+<section class="band">
+    <div class="shell empty-state">
+        <p class="eyebrow">No Match</p>
+        <h2>当前本地库里没有命中。</h2>
+        <p>可以尝试换成更贴近争议焦点的词组，或者先扩充 CanLII 数据覆盖范围。</p>
     </div>
-    {% endfor %}
-    {% endif %}
-
-    {% if grouped_results.other %}
-    <div class="section-title">其他结果 ({{ grouped_results.other|length }})</div>
-    {% for item in grouped_results.other %}
-    <div class="card result-card">
-        <div class="badge">{{ item.source_label }}</div>
-        <h2>{{ item.title }}</h2>
-        <p><strong>时间:</strong> {{ item.published_at }}</p>
-        {% if item.summary %}
-        <p><strong>摘要:</strong> {{ item.summary }}</p>
-        {% endif %}
-    </div>
-    {% endfor %}
-    {% endif %}
-
-    {% if total == 0 %}
-    <div class="card">
-        <p>没有检索到结果。</p>
-    </div>
-    {% endif %}
-</div>
-</body>
-</html>
+</section>
+{% endif %}
+{% endblock %}

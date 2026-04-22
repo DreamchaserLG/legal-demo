@@ -1,58 +1,140 @@
-﻿<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{{ app_name }}</title>
-    <link rel="stylesheet" href="/static/style.css" />
-</head>
-<body>
-<div class="container">
-    <h1>{{ app_name }}</h1>
-    <p class="subtitle">输入关键词后，系统会聚合 OFAC 和 CanLII 数据并在结果页展示。</p>
+﻿{% extends "base.html" %}
 
-    <div class="card">
-        <form method="post" action="/search">
+{% block title %}{{ app_name }} | 检索台{% endblock %}
+
+{% block content %}
+<section class="hero hero-home">
+    <div class="shell hero-grid home-grid">
+        <div class="hero-copy">
+            <p class="eyebrow">Legal Retrieval Demo</p>
+            <h1>先检索材料，再把案情送进分析和预测链路。</h1>
+            <p class="hero-text">
+                这个 demo 现在聚焦三页流程：关键词检索、案例分析、判决预测。
+                PDF 导出作为预测结果的附属能力保留，不再单独占一个页面。
+            </p>
+            <div class="metric-row">
+                <article class="metric-tile">
+                    <span>{{ dashboard.total_items }}</span>
+                    <small>本地条目总数</small>
+                </article>
+                <article class="metric-tile">
+                    <span>{{ dashboard.counts.canlii }}</span>
+                    <small>CanLII 案例</small>
+                </article>
+                <article class="metric-tile">
+                    <span>{{ dashboard.counts.ofac }}</span>
+                    <small>OFAC 条目</small>
+                </article>
+            </div>
+        </div>
+
+        <form class="tool-panel" method="get" action="/results" data-loading-mode="search">
+            <p class="panel-kicker">关键词检索</p>
             <label for="keywords">关键词</label>
             <input
                 type="text"
                 id="keywords"
                 name="keywords"
-                placeholder="例如: inheritance, contract, sanction"
+                placeholder="inheritance, contract, sanctions"
                 required
             />
-
-            <div class="row">
-                <div class="field">
-                    <label for="limit">结果数量</label>
-                    <input type="number" id="limit" name="limit" value="30" min="1" max="100" />
+            <div class="form-grid">
+                <div>
+                    <label for="search-limit">结果数</label>
+                    <input type="number" id="search-limit" name="limit" value="12" min="1" max="100" />
                 </div>
-                <div class="field">
-                    <label for="source">数据源</label>
-                    <select id="source" name="source">
+                <div>
+                    <label for="search-source">数据源</label>
+                    <select id="search-source" name="source">
                         <option value="all">全部</option>
-                        <option value="ofac">OFAC</option>
                         <option value="canlii">CanLII</option>
+                        <option value="ofac">OFAC</option>
                     </select>
                 </div>
-                <div class="field">
-                    <label for="sort">排序</label>
-                    <select id="sort" name="sort">
+                <div>
+                    <label for="search-sort">排序</label>
+                    <select id="search-sort" name="sort">
                         <option value="relevance">相关度优先</option>
                         <option value="recent">时间优先</option>
                     </select>
                 </div>
             </div>
-            <input type="hidden" name="offset" value="0" />
+            <div class="action-row">
+                <button type="submit">打开检索结果</button>
+            </div>
+        </form>
 
-            <label class="checkbox">
-                <input type="checkbox" name="sync_first" checked />
-                检索前先执行数据同步
-            </label>
-
-            <button type="submit">开始检索</button>
+        <form class="tool-panel" method="get" action="/analyze" data-loading-mode="analyze">
+            <p class="panel-kicker">案情分析</p>
+            <label for="text">案情描述</label>
+            <textarea
+                id="text"
+                name="text"
+                rows="6"
+                placeholder="例如：父母去世后，兄妹围绕遗嘱效力、房产分配和受托义务产生争议。"
+                required
+            ></textarea>
+            <div class="form-grid">
+                <div>
+                    <label for="analysis-limit">结果数</label>
+                    <input type="number" id="analysis-limit" name="limit" value="8" min="1" max="100" />
+                </div>
+                <div>
+                    <label for="analysis-source">数据源</label>
+                    <select id="analysis-source" name="source">
+                        <option value="all">全部</option>
+                        <option value="canlii">CanLII</option>
+                        <option value="ofac">OFAC</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="analysis-sort">排序</label>
+                    <select id="analysis-sort" name="sort">
+                        <option value="relevance">相关度优先</option>
+                        <option value="recent">时间优先</option>
+                    </select>
+                </div>
+            </div>
+            <div class="action-row dual">
+                <button type="submit">先做案情拆解</button>
+                <button type="submit" formaction="/predict" class="secondary">直接生成预测</button>
+            </div>
         </form>
     </div>
-</div>
-</body>
-</html>
+</section>
+
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <p class="eyebrow">Workflow</p>
+            <h2>从一句案情到一页结论的处理顺序</h2>
+        </div>
+        <div class="tile-grid">
+            <article class="tile">
+                <p class="tile-kicker">Step 1</p>
+                <h3>拆分输入</h3>
+                <p class="tile-copy">先把输入拆成事实、争议焦点、请求事项和关键词，避免只靠整句模糊匹配。</p>
+            </article>
+            <article class="tile">
+                <p class="tile-kicker">Step 2</p>
+                <h3>关联检索</h3>
+                <p class="tile-copy">优先从本地库召回最相关的 CanLII 和 OFAC 记录，按来源和相关度分组展示。</p>
+            </article>
+            <article class="tile">
+                <p class="tile-kicker">Step 3</p>
+                <h3>生成预测</h3>
+                <p class="tile-copy">在有支持材料的前提下输出预测结论、关键理由、风险点和支持案例摘要。</p>
+            </article>
+        </div>
+    </div>
+</section>
+
+<section class="band band-alt">
+    <div class="shell quick-links">
+        <a href="/results?keywords=contract&limit=10&source=canlii&sort=relevance">合同争议检索</a>
+        <a href="/results?keywords=sanction&limit=10&source=all&sort=relevance">制裁名单检索</a>
+        <a href="/analyze?text=The dispute concerns inheritance and property division.&limit=8&source=all&sort=relevance">继承与财产分配</a>
+        <a href="/predict?text=A shareholder alleges oppression after being excluded from management decisions.&limit=8&source=canlii&sort=relevance">股东压迫救济预测</a>
+    </div>
+</section>
+{% endblock %}

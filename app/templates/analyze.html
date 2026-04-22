@@ -1,0 +1,163 @@
+﻿{% extends "base.html" %}
+
+{% block title %}{{ app_name }} / 案例分析{% endblock %}
+
+{% block content %}
+<section class="hero hero-analyze">
+    <div class="shell hero-grid detail-grid">
+        <div class="hero-copy">
+            <p class="eyebrow">Case Analysis</p>
+            <h1>先拆解案情，再做关联检索。</h1>
+            <p class="hero-text">这一页会把输入案情自动整理成事实、争议焦点、请求事项和关键词，然后优先检索本地 CanLII 与 OFAC 数据。命中不足时，再补抓线上数据并回写本地。</p>
+        </div>
+
+        <form class="tool-panel" method="get" action="/analyze" data-loading-mode="analyze">
+            <label for="text">案情描述</label>
+            <textarea id="text" name="text" rows="7" placeholder="例如：父亲去世后，兄妹双方围绕遗嘱效力、房产分配和受托义务发生争议，并请求确认遗嘱是否有效。">{{ text_input }}</textarea>
+            <div class="form-grid">
+                <div>
+                    <label for="limit">结果数</label>
+                    <input type="number" id="limit" name="limit" value="{{ limit }}" min="1" max="100" />
+                </div>
+                <div>
+                    <label for="source">数据源</label>
+                    <select id="source" name="source">
+                        <option value="all" {% if source == "all" %}selected{% endif %}>全部</option>
+                        <option value="canlii" {% if source == "canlii" %}selected{% endif %}>CanLII</option>
+                        <option value="ofac" {% if source == "ofac" %}selected{% endif %}>OFAC</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="sort">排序</label>
+                    <select id="sort" name="sort">
+                        <option value="relevance" {% if sort == "relevance" %}selected{% endif %}>相关度优先</option>
+                        <option value="recent" {% if sort == "recent" %}selected{% endif %}>时间优先</option>
+                    </select>
+                </div>
+            </div>
+            <div class="action-row">
+                <button type="submit">分析并检索</button>
+                <button type="submit" formaction="/predict" class="secondary">进入判决预测</button>
+            </div>
+        </form>
+    </div>
+</section>
+
+{% if analysis_result %}
+{% set intake = analysis_result.get('intake_outline', {}) %}
+{% include "partials/task_banner.html" %}
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <p class="eyebrow">Analysis Summary</p>
+            <h2>结构化案例分析</h2>
+        </div>
+        <div class="snapshot-grid">
+            <article class="snapshot-card snapshot-wide">
+                <p class="panel-kicker">事实</p>
+                <p class="memo-copy">{{ intake.get('facts') or "未提炼出独立事实段落。" }}</p>
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">争议焦点</p>
+                {% if intake.get('disputed_issues') %}
+                <ul class="memo-list">
+                    {% for issue in intake.get('disputed_issues', []) %}
+                    <li>{{ issue }}</li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="muted">未识别到稳定争议焦点。</p>
+                {% endif %}
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">请求事项</p>
+                <p class="memo-copy">{{ intake.get('requested_relief') or "未提炼出明确请求事项。" }}</p>
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">关键词</p>
+                <div class="chip-row">
+                    {% for keyword in intake.get('keywords', []) %}
+                    <span class="chip">{{ keyword }}</span>
+                    {% endfor %}
+                </div>
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">法域</p>
+                <p>{{ analysis_result.analysis.jurisdiction or "未识别" }}</p>
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">法律主题</p>
+                <div class="chip-row">
+                    {% for topic in analysis_result.analysis.legal_topics %}
+                    <span class="chip">{{ topic }}</span>
+                    {% endfor %}
+                </div>
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">分析模式</p>
+                <p>{{ analysis_result.analysis_mode }}</p>
+                {% if analysis_result.analysis_error %}
+                <p class="muted">{{ analysis_result.analysis_error }}</p>
+                {% endif %}
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">风险标记</p>
+                {% if analysis_result.analysis.risk_flags %}
+                <ul class="memo-list memo-risk-list">
+                    {% for risk in analysis_result.analysis.risk_flags %}
+                    <li>{{ risk }}</li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="muted">当前没有提炼出独立风险标记。</p>
+                {% endif %}
+            </article>
+        </div>
+        {% if analysis_result.coverage_note %}
+        <p class="notice-text">{{ analysis_result.coverage_note }}</p>
+        {% endif %}
+        {% if analysis_result.history_reused %}
+        <p class="notice-text">当前案情命中了历史分析记录，已直接复用之前的结构化拆解结果，从而跳过一次模型分析。</p>
+        {% endif %}
+        {% if analysis_result.remote_fetch and analysis_result.remote_fetch.status != "local_only" and analysis_result.remote_fetch.message %}
+        <p class="notice-text">{{ analysis_result.remote_fetch.message }}</p>
+        {% endif %}
+    </div>
+</section>
+
+{% if analysis_result.history_matches %}
+<section class="band band-alt">
+    <div class="shell">
+        <div class="band-head">
+            <p class="eyebrow">History</p>
+            <h2>历史相似案情</h2>
+        </div>
+        <div class="history-grid">
+            {% for item in analysis_result.history_matches %}
+            <article class="history-card">
+                <div class="history-head">
+                    <span class="score-tag">相似度 {{ '%.2f'|format(item.similarity or 0) }}</span>
+                    {% if item.is_exact %}
+                    <span class="source-tag">完全一致</span>
+                    {% endif %}
+                </div>
+                <p class="memo-copy">{{ item.summary }}</p>
+                <p class="muted">{{ item.input_excerpt }}</p>
+                <div class="chip-row">
+                    {% for keyword in item.keywords %}
+                    <span class="chip">{{ keyword }}</span>
+                    {% endfor %}
+                </div>
+                <p class="muted">记录时间 {{ item.created_at }} / 来源 {{ item.source_filter }} / 命中 {{ item.result_count }} 条</p>
+            </article>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endif %}
+
+{% set grouped_results = analysis_result.grouped_results %}
+{% set sync_info = None %}
+{% include "partials/search_sections.html" %}
+{% endif %}
+{% endblock %}

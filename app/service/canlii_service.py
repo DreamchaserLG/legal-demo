@@ -1,5 +1,7 @@
 ﻿import ssl
+import time
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from typing import Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -11,6 +13,9 @@ from urllib3.util.retry import Retry
 
 from app.core.config import settings
 from app.service.common_service import log_sync, parse_dt, replace_item_keywords, sha256_text, upsert_source_item
+
+CANLII_DATABASES_INDEX_URL = "https://www.canlii.org/en/databases.html"
+_DATABASE_PAGE_CACHE: dict[str, object] = {"expires_at": 0.0, "pages": []}
 
 HTTP_HEADERS = {
     "User-Agent": (
@@ -90,6 +95,59 @@ def _normalize_canlii_url(url: str) -> str:
 
 def _get_soup(url: str) -> BeautifulSoup:
     return BeautifulSoup(_http_get(url).text, "html.parser")
+
+
+def _is_case_database_url(url: str) -> bool:
+    normalized = _normalize_canlii_url(url)
+    prefix = "https://www.canlii.org/"
+    if not normalized.startswith(prefix):
+        return False
+    path = normalized[len(prefix):].strip("/")
+    segments = [segment for segment in path.split("/") if segment]
+    return len(segments) == 3 and segments[0] == "en"
+
+
+def _discover_case_database_pages() -> List[str]:
+    ttl_seconds = max(300, int(getattr(settings, "canlii_database_discovery_ttl_seconds", 21600)))
+    now = time.time()
+    cached_pages = _DATABASE_PAGE_CACHE.get("pages") or []
+    if cached_pages and float(_DATABASE_PAGE_CACHE.get("expires_at") or 0.0) > now:
+        return list(cached_pages)
+
+    pages = []
+    seen = set()
+    try:
+        soup = _get_soup(CANLII_DATABASES_INDEX_URL)
+        for anchor in soup.find_all("a", href=True):
+            full_url = _normalize_canlii_url(urljoin(CANLII_DATABASES_INDEX_URL, anchor["href"]))
+            if not _is_case_database_url(full_url):
+                continue
+            if full_url in seen:
+                continue
+            seen.add(full_url)
+            pages.append(full_url)
+    except Exception:
+        pages = []
+
+    _DATABASE_PAGE_CACHE["pages"] = pages
+    _DATABASE_PAGE_CACHE["expires_at"] = now + ttl_seconds
+    return list(pages)
+
+
+def _keyword_search_database_pages() -> List[str]:
+    configured_pages = [_normalize_canlii_url(page) for page in settings.canlii_database_pages if str(page).strip()]
+    discovered_pages = _discover_case_database_pages()
+
+    combined = []
+    seen = set()
+    for page in configured_pages + discovered_pages:
+        if page in seen:
+            continue
+        seen.add(page)
+        combined.append(page)
+
+    page_limit = max(1, int(getattr(settings, "canlii_remote_database_page_limit", 80)))
+    return combined[:page_limit]
 
 
 def _is_rss_url_working(url: str) -> bool:
@@ -183,9 +241,66 @@ def _keywords_from_texts(*values) -> List[str]:
     return result
 
 
+def _keyword_match(values: List[str], keywords: List[str]) -> bool:
+    haystack = " ".join([str(value or "") for value in values]).lower()
+    return any(str(keyword or "").strip().lower() in haystack for keyword in keywords if str(keyword or "").strip())
+
+
+def _extract_case_text(url: str) -> str:
+    if not url:
+        return ""
+    try:
+        soup = _get_soup(url)
+    except Exception:
+        return ""
+
+    container = soup.find("main") or soup.find("article") or soup.body
+    if not container:
+        return ""
+
+    for tag in container.find_all(["script", "style", "noscript"]):
+        tag.decompose()
+
+    text_content = " ".join(container.stripped_strings)
+    return text_content[:6000]
+
+
+def _store_canlii_item(item: Dict, rss_url: str, page_url: str, fetch_mode: str = "sync", enrich_case_text: bool = False) -> int:
+    title = item["title"] or "Untitled CanLII Item"
+    link = item["link"]
+    pub_date = parse_dt(item["pub_date"])
+    description = item["description"]
+    case_text = _extract_case_text(link) if enrich_case_text else ""
+
+    raw_text = case_text or description or title
+    source_uid = sha256_text((link or title) + "|" + (item["pub_date"] or ""))
+
+    item_id = upsert_source_item(
+        source_code="canlii",
+        source_uid=source_uid,
+        title=title,
+        item_url=link,
+        published_at=pub_date,
+        summary=(description or raw_text)[:1000],
+        raw_text=raw_text[:6000],
+        raw_json={
+            "rss_url": rss_url,
+            "database_page": page_url,
+            "pub_date": item["pub_date"],
+            "fetch_mode": fetch_mode,
+            "fetched_at": datetime.utcnow().isoformat(),
+        },
+    )
+
+    keywords = _keywords_from_texts(title, description, raw_text)
+    replace_item_keywords(item_id, keywords)
+    return 1
+
+
 def sync_canlii_demo():
-    if not settings.canlii_database_pages:
-        message = "CANLII_DATABASE_PAGES is empty"
+    database_pages = _keyword_search_database_pages()
+    if not database_pages:
+        message = "No CanLII database pages are available for traversal."
         log_sync("canlii", "skipped", message)
         return {
             "source": "canlii",
@@ -198,7 +313,7 @@ def sync_canlii_demo():
     processed = 0
     page_errors = []
 
-    for raw_page_url in settings.canlii_database_pages:
+    for raw_page_url in database_pages:
         page_url = _normalize_canlii_url(raw_page_url)
 
         try:
@@ -208,32 +323,13 @@ def sync_canlii_demo():
                 continue
 
             for item in _parse_rss_items(rss_url):
-                title = item["title"] or "Untitled CanLII Item"
-                link = item["link"]
-                pub_date = parse_dt(item["pub_date"])
-                description = item["description"]
-
-                raw_text = description or title
-                source_uid = sha256_text((link or title) + "|" + (item["pub_date"] or ""))
-
-                item_id = upsert_source_item(
-                    source_code="canlii",
-                    source_uid=source_uid,
-                    title=title,
-                    item_url=link,
-                    published_at=pub_date,
-                    summary=(description or raw_text)[:1000],
-                    raw_text=raw_text[:6000],
-                    raw_json={
-                        "rss_url": rss_url,
-                        "database_page": page_url,
-                        "pub_date": item["pub_date"],
-                    },
+                processed += _store_canlii_item(
+                    item=item,
+                    rss_url=rss_url,
+                    page_url=page_url,
+                    fetch_mode="sync",
+                    enrich_case_text=False,
                 )
-
-                keywords = _keywords_from_texts(title, description, raw_text)
-                replace_item_keywords(item_id, keywords)
-                processed += 1
 
         except Exception as exc:
             page_errors.append(f"{page_url}: {exc}")
@@ -249,6 +345,83 @@ def sync_canlii_demo():
         error_type = ""
 
     log_sync("canlii", status, f"CanLII sync done, processed={processed}")
+    return {
+        "source": "canlii",
+        "status": status,
+        "processed": processed,
+        "items": processed,
+        "message": message,
+        "error_type": error_type,
+    }
+
+
+def sync_canlii_by_keywords(keywords: List[str], target_count: int | None = None):
+    clean_keywords = [str(keyword).strip() for keyword in keywords if str(keyword).strip()]
+    if not clean_keywords:
+        return {
+            "source": "canlii",
+            "status": "skipped",
+            "processed": 0,
+            "items": 0,
+            "message": "No keywords were provided for CanLII hydration.",
+            "error_type": "missing_keywords",
+        }
+
+    database_pages = _keyword_search_database_pages()
+    if not database_pages:
+        return {
+            "source": "canlii",
+            "status": "skipped",
+            "processed": 0,
+            "items": 0,
+            "message": "No CanLII database pages are available for traversal.",
+            "error_type": "missing_config",
+        }
+
+    processed = 0
+    page_errors = []
+    configured_limit = max(1, int(getattr(settings, "remote_search_max_items_per_source", 12)))
+    requested_limit = max(1, int(target_count or 0)) if target_count else 0
+    match_limit = max(configured_limit, requested_limit * 2 if requested_limit else 0)
+
+    for raw_page_url in database_pages:
+        if processed >= match_limit:
+            break
+
+        page_url = _normalize_canlii_url(raw_page_url)
+        try:
+            rss_url = _discover_rss_url(page_url)
+            if not rss_url:
+                page_errors.append(f"{page_url}: RSS not found")
+                continue
+
+            for item in _parse_rss_items(rss_url):
+                if processed >= match_limit:
+                    break
+                if not _keyword_match([item.get("title"), item.get("description")], clean_keywords):
+                    continue
+                processed += _store_canlii_item(
+                    item=item,
+                    rss_url=rss_url,
+                    page_url=page_url,
+                    fetch_mode="search_hydration",
+                    enrich_case_text=True,
+                )
+        except Exception as exc:
+            page_errors.append(f"{page_url}: {exc}")
+
+    if processed > 0 and page_errors:
+        status = "partial_success"
+        error_type = "partial_failure"
+    elif processed > 0:
+        status = "success"
+        error_type = ""
+    else:
+        status = "failed" if page_errors else "skipped"
+        error_type = "remote_search_failed" if page_errors else "no_match"
+
+    message = "；".join(page_errors) if page_errors else f"CanLII remote hydration stored {processed} items."
+    log_sync("canlii", status, f"CanLII remote hydration done, processed={processed}, keywords={clean_keywords}")
     return {
         "source": "canlii",
         "status": status,

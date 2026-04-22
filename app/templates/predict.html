@@ -1,0 +1,328 @@
+﻿{% extends "base.html" %}
+
+{% block title %}{{ app_name }} / 判决预测{% endblock %}
+
+{% block content %}
+<section class="hero hero-predict">
+    <div class="shell hero-grid detail-grid">
+        <div class="hero-copy">
+            <p class="eyebrow">Outcome Prediction</p>
+            <h1>基于案例分析和命中材料输出预测结论。</h1>
+            <p class="hero-text">这一页会复用案例分析结果，结合命中的支持案例和风险点，生成更接近法律研究备忘风格的预测结论。PDF 仅作为导出结果，不再作为单独页面使用。</p>
+        </div>
+
+        <form class="tool-panel" method="get" action="/predict" data-loading-mode="predict">
+            <label for="text">案情描述</label>
+            <textarea id="text" name="text" rows="7" placeholder="例如：安大略省一家封闭式公司中，小股东主张大股东长期将其排除在经营决策之外，并拒绝提供财务记录。">{{ text_input }}</textarea>
+            <div class="form-grid">
+                <div>
+                    <label for="limit">结果数</label>
+                    <input type="number" id="limit" name="limit" value="{{ limit }}" min="1" max="100" />
+                </div>
+                <div>
+                    <label for="source">数据源</label>
+                    <select id="source" name="source">
+                        <option value="all" {% if source == "all" %}selected{% endif %}>全部</option>
+                        <option value="canlii" {% if source == "canlii" %}selected{% endif %}>CanLII</option>
+                        <option value="ofac" {% if source == "ofac" %}selected{% endif %}>OFAC</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="sort">排序</label>
+                    <select id="sort" name="sort">
+                        <option value="relevance" {% if sort == "relevance" %}selected{% endif %}>相关度优先</option>
+                        <option value="recent" {% if sort == "recent" %}selected{% endif %}>时间优先</option>
+                    </select>
+                </div>
+            </div>
+            <div class="action-row">
+                <button type="submit">生成判决预测</button>
+            </div>
+        </form>
+    </div>
+</section>
+
+{% if prediction_result %}
+{% set intake = prediction_result.get('intake_outline', {}) %}
+{% include "partials/task_banner.html" %}
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <p class="eyebrow">Case Analysis</p>
+            <h2>预测使用的案例分析摘要</h2>
+        </div>
+        <div class="snapshot-grid">
+            <article class="snapshot-card snapshot-wide">
+                <p class="panel-kicker">事实</p>
+                <p class="memo-copy">{{ intake.get('facts') or "未提炼出独立事实段落。" }}</p>
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">争议焦点</p>
+                {% if intake.get('disputed_issues') %}
+                <ul class="memo-list">
+                    {% for issue in intake.get('disputed_issues', []) %}
+                    <li>{{ issue }}</li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="muted">未识别到稳定争议焦点。</p>
+                {% endif %}
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">请求事项</p>
+                <p class="memo-copy">{{ intake.get('requested_relief') or "未提炼出明确请求事项。" }}</p>
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">关键词</p>
+                <div class="chip-row">
+                    {% for keyword in intake.get('keywords', []) %}
+                    <span class="chip">{{ keyword }}</span>
+                    {% endfor %}
+                </div>
+            </article>
+        </div>
+    </div>
+</section>
+
+<section class="band band-alt">
+    <div class="shell">
+        <div class="opinion-shell">
+            <section class="opinion-main">
+                <div class="opinion-head">
+                    <div>
+                        <p class="eyebrow">Prediction Result</p>
+                        <h2>{{ prediction_result.prediction.predicted_outcome }}</h2>
+                    </div>
+                    <div class="status-cluster">
+                        <span class="meta-badge">{{ prediction_result.prediction.model_status }}</span>
+                        {% if prediction_result.prediction.model_name %}
+                        <span class="meta-badge muted-badge">{{ prediction_result.prediction.model_name }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="memo-grid">
+                    <article class="memo-card memo-outcome">
+                        <p class="panel-kicker">预测理由</p>
+                        <p class="memo-copy">{{ prediction_result.prediction.reasoning }}</p>
+                    </article>
+
+                    <article class="memo-card">
+                        <p class="panel-kicker">支持理由</p>
+                        {% if prediction_result.prediction.reason_points %}
+                        <ul class="memo-list">
+                            {% for factor in prediction_result.prediction.reason_points %}
+                            <li>{{ factor }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <p class="muted">当前没有提炼出稳定的支持理由。</p>
+                        {% endif %}
+                    </article>
+
+                    <article class="memo-card">
+                        <p class="panel-kicker">风险点</p>
+                        {% if prediction_result.prediction.risk_points %}
+                        <ul class="memo-list memo-risk-list">
+                            {% for caveat in prediction_result.prediction.risk_points %}
+                            <li>{{ caveat }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <p class="muted">当前没有提炼出明确风险点。</p>
+                        {% endif %}
+                    </article>
+                </div>
+            </section>
+
+            <aside class="opinion-side">
+                <article class="verdict-card">
+                    <p class="panel-kicker">导出与跳转</p>
+                    <div class="memo-actions">
+                        {% if analysis_url %}
+                        <a class="pager-link memo-link" href="{{ analysis_url }}">返回案例分析</a>
+                        {% endif %}
+                        {% if memo_download_url %}
+                        <a class="pager-link memo-link" href="{{ memo_download_url }}">下载预测报告 PDF</a>
+                        {% endif %}
+                    </div>
+                </article>
+
+                <article class="verdict-card">
+                    <p class="panel-kicker">可能胜出方</p>
+                    <h3>{{ prediction_result.prediction.likely_prevailing_party }}</h3>
+                </article>
+
+                <article class="verdict-card confidence-card">
+                    <p class="panel-kicker">置信度</p>
+                    <div class="confidence-ring" style="--confidence: {{ prediction_result.prediction.confidence_percent }};">
+                        <span>{{ prediction_result.prediction.confidence_percent }}%</span>
+                    </div>
+                    <p class="muted">原始值 {{ prediction_result.prediction.confidence }}</p>
+                </article>
+
+                <article class="verdict-card">
+                    <p class="panel-kicker">法域</p>
+                    <p>{{ prediction_result.prediction.jurisdiction or prediction_result.analysis.jurisdiction or "未识别" }}</p>
+                </article>
+
+                <article class="verdict-card">
+                    <p class="panel-kicker">请求事项</p>
+                    <p>{{ intake.get('requested_relief') or prediction_result.prediction.requested_relief or "未明确请求事项" }}</p>
+                </article>
+
+                <article class="verdict-card">
+                    <p class="panel-kicker">支持案例数</p>
+                    <p>{{ prediction_result.prediction.support_case_count }}</p>
+                </article>
+
+                {% if prediction_result.prediction.execution_summary %}
+                <article class="verdict-card">
+                    <p class="panel-kicker">执行轨迹</p>
+                    <ul class="memo-list">
+                        {% for item in prediction_result.prediction.execution_summary %}
+                        <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                </article>
+                {% endif %}
+            </aside>
+        </div>
+
+        {% if prediction_result.history_reused %}
+        <p class="notice-text">当前案情命中了历史分析记录，已跳过一次结构化分析模型调用。</p>
+        {% endif %}
+        {% if prediction_result.prediction.model_status == "history_reuse" %}
+        <p class="notice-text">当前预测命中了历史预测记录，已直接复用上一轮预测结果以缩短等待时间。</p>
+        {% endif %}
+        {% if prediction_result.prediction.model_error %}
+        <p class="notice-text">{{ prediction_result.prediction.model_error }}</p>
+        {% endif %}
+        {% if prediction_result.remote_fetch and prediction_result.remote_fetch.status != "local_only" and prediction_result.remote_fetch.message %}
+        <p class="notice-text">{{ prediction_result.remote_fetch.message }}</p>
+        {% endif %}
+    </div>
+</section>
+
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <p class="eyebrow">Supporting Cases</p>
+            <h2>命中的支持案例</h2>
+        </div>
+        {% if prediction_result.precedents %}
+        <div class="support-grid">
+            {% for precedent in prediction_result.precedents %}
+            <article class="support-card">
+                <div class="support-head">
+                    <span class="source-tag">{{ precedent.source_code|upper }}</span>
+                    {% if precedent.published_at %}
+                    <span class="meta-inline">{{ precedent.published_at[:10] }}</span>
+                    {% endif %}
+                </div>
+                <h3>{{ precedent.title }}</h3>
+                <p class="result-copy">{{ precedent.summary }}</p>
+                <div class="support-columns">
+                    <div>
+                        <p class="panel-kicker">相似点</p>
+                        <ul class="memo-list">
+                            {% for point in precedent.similarities %}
+                            <li>{{ point }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    <div>
+                        <p class="panel-kicker">差异点</p>
+                        <ul class="memo-list memo-risk-list">
+                            {% for point in precedent.differences %}
+                            <li>{{ point }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+                <div class="card-actions">
+                    {% if precedent.url %}
+                    <a class="text-link" href="{{ precedent.url }}" target="_blank">查看案例</a>
+                    {% endif %}
+                    {% if precedent.source_url %}
+                    <a class="text-link" href="{{ precedent.source_url }}" target="_blank">查看案例来源</a>
+                    {% endif %}
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <h2>没有命中可支持预测的案例</h2>
+            <p>当前检索结果不足，页面只能展示预览级预测。下一步应扩充 CanLII 数据覆盖，或进一步优化案情拆解和关键词提取。</p>
+        </div>
+        {% endif %}
+    </div>
+</section>
+
+<section class="band band-alt">
+    <div class="shell">
+        <div class="band-head">
+            <p class="eyebrow">Supplement</p>
+            <h2>补充分析字段</h2>
+        </div>
+        <div class="snapshot-grid">
+            <article class="snapshot-card">
+                <p class="panel-kicker">法律主题</p>
+                <div class="chip-row">
+                    {% for topic in prediction_result.analysis.legal_topics %}
+                    <span class="chip">{{ topic }}</span>
+                    {% endfor %}
+                </div>
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">主张</p>
+                {% if prediction_result.analysis.claims %}
+                <ul class="memo-list">
+                    {% for claim in prediction_result.analysis.claims %}
+                    <li>{{ claim }}</li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="muted">当前没有单独提炼主张。</p>
+                {% endif %}
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">风险标记</p>
+                {% if prediction_result.analysis.risk_flags %}
+                <ul class="memo-list memo-risk-list">
+                    {% for risk in prediction_result.analysis.risk_flags %}
+                    <li>{{ risk }}</li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="muted">当前没有提炼出独立风险标记。</p>
+                {% endif %}
+            </article>
+            <article class="snapshot-card">
+                <p class="panel-kicker">分析模式</p>
+                <p>{{ prediction_result.analysis_mode }}</p>
+                {% if prediction_result.analysis_error %}
+                <p class="muted">{{ prediction_result.analysis_error }}</p>
+                {% endif %}
+            </article>
+        </div>
+    </div>
+</section>
+
+{% if prediction_result.grouped_results.canlii or prediction_result.grouped_results.ofac or prediction_result.grouped_results.other %}
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <p class="eyebrow">Retrieved Records</p>
+            <h2>完整检索结果</h2>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+{% set grouped_results = prediction_result.grouped_results %}
+{% set sync_info = None %}
+{% include "partials/search_sections.html" %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,167 @@
+﻿{% set intake = prediction_result.get('intake_outline', {}) %}
+<article class="memo-sheet">
+    <header class="memo-header">
+        <p class="memo-label">LEGAL RESEARCH DEMO REPORT</p>
+        <h1>案件预测报告</h1>
+        <p class="memo-subtitle">本报告汇总案例分析、支持案例比较与预测结论。下载 PDF 与页面展示使用同一套内容结构，以减少样式和排版偏差。</p>
+    </header>
+
+    <section class="memo-meta">
+        <div><span>对象</span><strong>案件研判记录</strong></div>
+        <div><span>模型</span><strong>{{ dashboard.llm_provider }} / {{ dashboard.llm_model }}</strong></div>
+        <div><span>日期</span><strong>{{ memo_date }}</strong></div>
+        <div><span>主题</span><strong>{{ prediction_result.analysis.summary or prediction_result.prediction.likely_prevailing_party }}</strong></div>
+    </section>
+
+    <section class="memo-section">
+        <h2>1. 案例分析</h2>
+        <div class="memo-grid-plain">
+            <div class="memo-block memo-block-wide">
+                <h3>事实</h3>
+                <p>{{ intake.get('facts') or "未提炼出独立事实段落。" }}</p>
+            </div>
+            <div class="memo-block">
+                <h3>争议焦点</h3>
+                {% if intake.get('disputed_issues') %}
+                <ul>
+                    {% for issue in intake.get('disputed_issues', []) %}
+                    <li>{{ issue }}</li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p>未提炼出稳定争议焦点。</p>
+                {% endif %}
+            </div>
+            <div class="memo-block">
+                <h3>请求事项</h3>
+                <p>{{ intake.get('requested_relief') or "未提炼出明确请求事项。" }}</p>
+            </div>
+            <div class="memo-block memo-block-wide">
+                <h3>检索关键词</h3>
+                <p>{{ intake.get('keywords', []) | join(" / ") or "-" }}</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="memo-section">
+        <h2>2. 预测结论</h2>
+        <div class="memo-grid-plain">
+            <div class="memo-block memo-block-wide">
+                <h3>结论</h3>
+                <p>{{ prediction_result.prediction.predicted_outcome }}</p>
+            </div>
+            <div class="memo-block">
+                <h3>可能胜出方</h3>
+                <p>{{ prediction_result.prediction.likely_prevailing_party }}</p>
+            </div>
+            <div class="memo-block">
+                <h3>置信度</h3>
+                <p>{{ prediction_result.prediction.confidence_percent }}% (原始值 {{ prediction_result.prediction.confidence }})</p>
+            </div>
+            <div class="memo-block memo-block-wide">
+                <h3>预测理由</h3>
+                <p>{{ prediction_result.prediction.reasoning }}</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="memo-section">
+        <h2>3. 支持案例</h2>
+        {% if prediction_result.precedents %}
+        <table class="memo-table">
+            <thead>
+            <tr>
+                <th>案例</th>
+                <th>相似点</th>
+                <th>差异点</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for precedent in prediction_result.precedents %}
+            <tr>
+                <td>
+                    <strong>{{ precedent.title }}</strong>
+                    <div class="memo-table-meta">{{ precedent.source_code|upper }}{% if precedent.published_at %} / {{ precedent.published_at[:10] }}{% endif %}</div>
+                    {% if precedent.url %}
+                    <div><a class="text-link" href="{{ precedent.url }}" target="_blank">查看案例</a></div>
+                    {% endif %}
+                    {% if precedent.source_url %}
+                    <div><a class="text-link" href="{{ precedent.source_url }}" target="_blank">查看案例来源</a></div>
+                    {% endif %}
+                </td>
+                <td>
+                    <ul>
+                        {% for point in precedent.similarities %}
+                        <li>{{ point }}</li>
+                        {% endfor %}
+                    </ul>
+                </td>
+                <td>
+                    <ul>
+                        {% for point in precedent.differences %}
+                        <li>{{ point }}</li>
+                        {% endfor %}
+                    </ul>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="memo-block">
+            <p>当前没有检索到可支持预测的案例记录。</p>
+        </div>
+        {% endif %}
+    </section>
+
+    <section class="memo-section">
+        <h2>4. 理由与风险</h2>
+        <div class="memo-grid-plain">
+            <div class="memo-block">
+                <h3>支持理由</h3>
+                {% if prediction_result.prediction.reason_points %}
+                <ul>
+                    {% for item in prediction_result.prediction.reason_points %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p>当前没有提炼出稳定的支持理由。</p>
+                {% endif %}
+            </div>
+            <div class="memo-block">
+                <h3>风险点</h3>
+                {% if prediction_result.prediction.risk_points %}
+                <ul>
+                    {% for item in prediction_result.prediction.risk_points %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p>当前没有提炼出明确风险点。</p>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    {% if prediction_result.prediction.execution_summary %}
+    <section class="memo-section">
+        <h2>5. 执行轨迹</h2>
+        <div class="memo-block">
+            <ul>
+                {% for item in prediction_result.prediction.execution_summary %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+    {% endif %}
+
+    <section class="memo-section memo-disclaimer">
+        <h2>6. 说明</h2>
+        <p>本报告仅用于 demo 展示，结论依赖当前数据覆盖范围、检索质量和模型稳定性，不构成正式法律意见。</p>
+        {% if prediction_result.prediction.model_error %}
+        <p>模型备注：{{ prediction_result.prediction.model_error }}</p>
+        {% endif %}
+    </section>
+</article>

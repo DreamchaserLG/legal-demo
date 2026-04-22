@@ -1,0 +1,67 @@
+{% if ingestion_task %}
+<section class="band">
+    <div class="shell">
+        <div
+            class="task-banner"
+            data-task-banner
+            data-task-id="{{ ingestion_task.id }}"
+            data-refresh-url="{{ task_refresh_url }}"
+            data-poll-ms="{{ task_poll_ms }}"
+        >
+            <div class="task-banner-head">
+                <div>
+                    <p class="eyebrow">Async Hydration</p>
+                    <h2>后台扩库任务</h2>
+                </div>
+                <span class="task-status" data-task-status>{{ ingestion_task.status_label }}</span>
+            </div>
+            <p class="task-copy" data-task-message>{{ ingestion_task.message or "后台任务已创建。" }}</p>
+            <p class="muted" data-task-count>累计处理 {{ ingestion_task.items_processed or 0 }} 条，当前本地命中 {{ ingestion_task.result_total_after or ingestion_task.current_local_count or 0 }} 条。</p>
+        </div>
+    </div>
+</section>
+<script>
+(() => {
+    const root = document.querySelector('[data-task-banner][data-task-id="{{ ingestion_task.id }}"]');
+    if (!root) return;
+    const pollMs = Number(root.dataset.pollMs || 3000);
+    const taskId = root.dataset.taskId;
+    const refreshUrl = root.dataset.refreshUrl;
+    const statusEl = root.querySelector('[data-task-status]');
+    const messageEl = root.querySelector('[data-task-message]');
+    const countEl = root.querySelector('[data-task-count]');
+    let active = {{ "true" if ingestion_task.status in ["queued", "running"] else "false" }};
+
+    async function pollTask() {
+        if (!active || !taskId) return;
+        try {
+            const response = await fetch(`/api/ingestion-tasks/${taskId}`, { cache: 'no-store' });
+            if (!response.ok) {
+                active = false;
+                return;
+            }
+            const payload = await response.json();
+            statusEl.textContent = payload.status_label || payload.status || '-';
+            messageEl.textContent = payload.message || '后台任务状态已更新。';
+            countEl.textContent = `累计处理 ${payload.items_processed || 0} 条，当前本地命中 ${payload.result_total_after || payload.current_local_count || 0} 条。`;
+
+            if (payload.should_refresh && refreshUrl) {
+                window.location.replace(refreshUrl);
+                return;
+            }
+            if (payload.is_terminal) {
+                active = false;
+                return;
+            }
+        } catch (error) {
+            console.error('ingestion task poll failed', error);
+        }
+        window.setTimeout(pollTask, pollMs);
+    }
+
+    if (active) {
+        window.setTimeout(pollTask, pollMs);
+    }
+})();
+</script>
+{% endif %}

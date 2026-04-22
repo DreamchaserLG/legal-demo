@@ -1,0 +1,231 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}{{ app_name }}{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="page-{{ page_id }}">
+<header class="site-header">
+    <div class="shell header-row">
+        <a class="brand" href="/">{{ app_name }}</a>
+        <nav class="site-nav">
+            <a class="{% if page_id in ['home', 'search'] %}active{% endif %}" href="/">关键词检索</a>
+            <a class="{% if page_id == 'analyze' %}active{% endif %}" href="/analyze">案例分析</a>
+            <a class="{% if page_id == 'predict' %}active{% endif %}" href="/predict">判决预测</a>
+        </nav>
+        <div class="status-pill {% if dashboard.llm_configured %}ready{% else %}waiting{% endif %}">
+            {% if dashboard.llm_configured %}
+            模型已接入 / {{ dashboard.llm_provider }} / {{ dashboard.llm_model }}
+            {% else %}
+            模型未配置 / 当前仅提供检索与预览输出
+            {% endif %}
+        </div>
+    </div>
+</header>
+
+<div class="loading-overlay" id="global-loading-overlay" aria-hidden="true">
+    <div class="loading-backdrop"></div>
+    <section class="loading-panel" aria-live="polite" aria-busy="true" aria-labelledby="loading-title">
+        <p class="loading-kicker">Legal Agent</p>
+        <h2 id="loading-title">正在处理请求</h2>
+        <p class="loading-copy" id="loading-copy">系统正在准备分析、检索和结果整理，请稍候。</p>
+
+        <div
+            class="loading-progress"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="8"
+            aria-valuetext="正在启动"
+            id="loading-progress"
+        >
+            <div class="loading-progress-bar" id="loading-progress-bar"></div>
+        </div>
+
+        <div class="loading-stage-list" id="loading-stage-list">
+            <div class="loading-stage active">
+                <span class="loading-stage-dot"></span>
+                <span>准备请求</span>
+            </div>
+        </div>
+
+        <div class="loading-meta">
+            <span class="loading-chip" id="loading-percent">8%</span>
+            <span class="loading-chip muted" id="loading-elapsed">0s</span>
+            <span class="loading-chip muted" id="loading-hint">请不要重复提交</span>
+        </div>
+    </section>
+</div>
+
+<main>
+    {% block content %}{% endblock %}
+</main>
+
+<footer class="site-footer">
+    <div class="shell footer-row">
+        <span>本地条目 {{ dashboard.total_items }}</span>
+        <span>CanLII {{ dashboard.counts.canlii }}</span>
+        <span>OFAC {{ dashboard.counts.ofac }}</span>
+    </div>
+</footer>
+<script>
+(() => {
+    const overlay = document.getElementById('global-loading-overlay');
+    if (!overlay) return;
+
+    const titleEl = document.getElementById('loading-title');
+    const copyEl = document.getElementById('loading-copy');
+    const percentEl = document.getElementById('loading-percent');
+    const elapsedEl = document.getElementById('loading-elapsed');
+    const hintEl = document.getElementById('loading-hint');
+    const stageListEl = document.getElementById('loading-stage-list');
+    const progressEl = document.getElementById('loading-progress');
+    const progressBarEl = document.getElementById('loading-progress-bar');
+
+    const profiles = {
+        search: {
+            title: '正在检索法律材料',
+            copy: '先解析关键词，再检索本地库；如果本地命中不足，会自动排队扩库。',
+            hint: '通常 2 到 8 秒；如需补抓远端数据，结果页会继续动态更新。',
+            stages: [
+                { label: '解析关键词', target: 18, holdMs: 900 },
+                { label: '检索本地库', target: 42, holdMs: 1300 },
+                { label: '评估扩库策略', target: 66, holdMs: 1500 },
+                { label: '整理结果页面', target: 88, holdMs: 1800 },
+            ],
+        },
+        analyze: {
+            title: '正在分析案情并检索',
+            copy: '系统会先抽取事实、争议焦点、请求事项和关键词，再关联检索本地材料。',
+            hint: '模型分析和数据库检索需要时间，请保持当前页面。',
+            stages: [
+                { label: '发送案情到模型', target: 14, holdMs: 1200 },
+                { label: '提取事实与争议', target: 36, holdMs: 2200 },
+                { label: '生成检索关键词', target: 56, holdMs: 1800 },
+                { label: '检索支持材料', target: 78, holdMs: 2200 },
+                { label: '整理分析结果', target: 90, holdMs: 1800 },
+            ],
+        },
+        predict: {
+            title: '正在生成判决预测',
+            copy: '系统会复用案情分析结果、检索命中材料，并调用模型生成谨慎的预测结论。',
+            hint: '预测阶段通常最慢，因为会涉及结构化分析、检索和结论生成。',
+            stages: [
+                { label: '解析案情', target: 12, holdMs: 1400 },
+                { label: '提取关键词与争议', target: 32, holdMs: 2200 },
+                { label: '检索支持案例', target: 56, holdMs: 2200 },
+                { label: '比对风险与理由', target: 76, holdMs: 2200 },
+                { label: '生成预测结论', target: 92, holdMs: 2600 },
+            ],
+        },
+    };
+
+    let intervalId = null;
+    let phaseTimeoutId = null;
+    let currentProgress = 8;
+    let startedAt = 0;
+
+    function modeFromPath(pathname) {
+        if (pathname.startsWith('/predict')) return 'predict';
+        if (pathname.startsWith('/analyze')) return 'analyze';
+        return 'search';
+    }
+
+    function renderStages(profile, activeIndex) {
+        stageListEl.innerHTML = profile.stages.map((stage, index) => {
+            const cls = index < activeIndex ? 'done' : (index === activeIndex ? 'active' : '');
+            return `
+                <div class="loading-stage ${cls}">
+                    <span class="loading-stage-dot"></span>
+                    <span>${stage.label}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function setProgress(nextValue) {
+        currentProgress = Math.max(currentProgress, Math.min(nextValue, 95));
+        progressBarEl.style.width = `${currentProgress}%`;
+        progressEl.setAttribute('aria-valuenow', String(Math.round(currentProgress)));
+        percentEl.textContent = `${Math.round(currentProgress)}%`;
+    }
+
+    function startElapsedTimer() {
+        intervalId = window.setInterval(() => {
+            const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+            elapsedEl.textContent = `${elapsedSeconds}s`;
+            if (elapsedSeconds >= 10) {
+                hintEl.textContent = '仍在处理中，模型分析可能较慢，请不要重复提交。';
+            }
+        }, 200);
+    }
+
+    function animateStages(profile, index = 0) {
+        renderStages(profile, index);
+        if (index >= profile.stages.length) {
+            hintEl.textContent = '仍在处理中，系统可能正在等待模型响应或数据库结果。';
+            return;
+        }
+
+        const stage = profile.stages[index];
+        setProgress(stage.target);
+        phaseTimeoutId = window.setTimeout(() => animateStages(profile, index + 1), stage.holdMs);
+    }
+
+    function showLoading(mode) {
+        const profile = profiles[mode] || profiles.search;
+        titleEl.textContent = profile.title;
+        copyEl.textContent = profile.copy;
+        hintEl.textContent = profile.hint;
+        currentProgress = 8;
+        startedAt = Date.now();
+        setProgress(8);
+        renderStages(profile, 0);
+        overlay.classList.add('visible');
+        overlay.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('loading-active');
+        window.clearInterval(intervalId);
+        window.clearTimeout(phaseTimeoutId);
+        startElapsedTimer();
+        animateStages(profile, 0);
+    }
+
+    function sameOriginAction(url) {
+        try {
+            const parsed = new URL(url, window.location.origin);
+            return parsed.origin === window.location.origin ? parsed : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    document.querySelectorAll('form[data-loading-mode]').forEach((form) => {
+        form.addEventListener('submit', (event) => {
+            const submitter = event.submitter;
+            const targetUrl = sameOriginAction(submitter?.getAttribute('formaction') || form.getAttribute('action') || window.location.pathname);
+            const inferredMode = targetUrl ? modeFromPath(targetUrl.pathname) : (form.dataset.loadingMode || 'search');
+            showLoading(inferredMode);
+        });
+    });
+
+    document.querySelectorAll('a[href]').forEach((link) => {
+        link.addEventListener('click', (event) => {
+            if (event.defaultPrevented) return;
+            if (link.target && link.target !== '_self') return;
+            if (link.hasAttribute('download')) return;
+            const targetUrl = sameOriginAction(link.getAttribute('href'));
+            if (!targetUrl) return;
+            if (!['/results', '/analyze', '/predict'].some((prefix) => targetUrl.pathname.startsWith(prefix))) return;
+            if (!targetUrl.search) return;
+            showLoading(modeFromPath(targetUrl.pathname));
+        });
+    });
+})();
+</script>
+</body>
+</html>

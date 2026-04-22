@@ -1,0 +1,35 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test and tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE settings
+.idea/
+.vscode/
+
+# Runtime logs
+*.log
+*.err
+*.out
+
+# Temporary exports and artifacts
+tmp-*.pdf
+*.tmp
+*.bak
+
+# Local browser drivers
+drivers/

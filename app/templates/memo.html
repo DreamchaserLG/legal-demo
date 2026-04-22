@@ -1,0 +1,36 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ app_name }} / 案件预测报告</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="page-memo">
+<div class="memo-toolbar">
+    <div class="shell memo-toolbar-row">
+        <a class="pager-link" href="{{ analysis_url or '/analyze' }}">返回案例分析</a>
+        {% if memo_download_url %}
+        <a class="pager-link" href="{{ memo_download_url }}">下载预测报告 PDF</a>
+        {% endif %}
+        <button type="button" onclick="window.print()">打印页面</button>
+    </div>
+</div>
+
+{% if prediction_result %}
+<main class="memo-page">
+    {% include "partials/memo_content.html" %}
+</main>
+{% else %}
+<main class="memo-page">
+    <article class="memo-sheet">
+        <header class="memo-header">
+            <p class="memo-label">LEGAL RESEARCH DEMO REPORT</p>
+            <h1>案件预测报告</h1>
+            <p class="memo-subtitle">当前没有输入案情。请先在判决预测页生成结果，再下载 PDF。</p>
+        </header>
+    </article>
+</main>
+{% endif %}
+</body>
+</html>

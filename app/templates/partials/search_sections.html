@@ -1,0 +1,182 @@
+﻿{% if sync_info and sync_info.sources %}
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <p class="eyebrow">Sync Status</p>
+            <h2>最近一次数据同步</h2>
+        </div>
+        <div class="tile-grid">
+            {% for source_name, info in sync_info.sources.items() %}
+            <article class="tile">
+                <p class="tile-kicker">{{ source_name|upper }}</p>
+                <h3>{{ info["status"] if "status" in info else "-" }}</h3>
+                {% if "processed" in info %}
+                <p>处理 {{ info["processed"] }} 条</p>
+                {% endif %}
+                {% if "message" in info and info["message"] %}
+                <p class="tile-copy">{{ info["message"] }}</p>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endif %}
+
+{% if grouped_results.canlii %}
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <p class="eyebrow">CanLII</p>
+            <h2>案例结果</h2>
+        </div>
+        <div class="result-grid">
+            {% for item in grouped_results.canlii %}
+            <article class="result-card case">
+                <div class="result-head">
+                    <span class="source-tag">{{ item.source_label }}</span>
+                    <span class="score-tag">相关度 {{ '%.2f'|format(item.score or 0) }}</span>
+                </div>
+                <h3>{{ item.title }}</h3>
+                {% if item.subtitle %}
+                <p class="muted">{{ item.subtitle }}</p>
+                {% endif %}
+                <div class="chip-row">
+                    <span class="chip">{{ item.published_at }}</span>
+                    {% for label, value in item.fields %}
+                    <span class="chip">{{ label }} / {{ value }}</span>
+                    {% endfor %}
+                </div>
+                {% if item.summary %}
+                <p class="result-copy">{{ item.summary }}</p>
+                {% endif %}
+                <div class="card-footer">
+                    {% if item.excerpt %}
+                    <details>
+                        <summary>查看片段</summary>
+                        <div class="detail-box">{{ item.excerpt }}</div>
+                    </details>
+                    {% endif %}
+                    <div class="card-actions">
+                        {% if item.url %}
+                        <a class="text-link" href="{{ item.url }}" target="_blank">查看案例</a>
+                        {% endif %}
+                        {% if item.source_url %}
+                        <a class="text-link" href="{{ item.source_url }}" target="_blank">查看案例来源</a>
+                        {% endif %}
+                    </div>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endif %}
+
+{% if grouped_results.ofac %}
+<section class="band band-alt">
+    <div class="shell">
+        <div class="band-head">
+            <p class="eyebrow">OFAC</p>
+            <h2>制裁结果</h2>
+        </div>
+        <div class="result-grid">
+            {% for item in grouped_results.ofac %}
+            <article class="result-card sanction">
+                <div class="result-head">
+                    <span class="source-tag">{{ item.source_label }}</span>
+                    <span class="score-tag">相关度 {{ '%.2f'|format(item.score or 0) }}</span>
+                </div>
+                <h3>{{ item.title }}</h3>
+                {% if item.subtitle %}
+                <p class="muted">{{ item.subtitle }}</p>
+                {% endif %}
+                {% if item.fields %}
+                <dl class="definition-list">
+                    {% for label, value in item.fields %}
+                    <div>
+                        <dt>{{ label }}</dt>
+                        <dd>{{ value }}</dd>
+                    </div>
+                    {% endfor %}
+                </dl>
+                {% endif %}
+                {% if item.summary %}
+                <p class="result-copy">{{ item.summary }}</p>
+                {% endif %}
+                <div class="card-footer">
+                    {% if item.aliases %}
+                    <details>
+                        <summary>别名 {{ item.aliases|length }}</summary>
+                        <div class="detail-box">
+                            <ul class="plain-list">
+                                {% for alias in item.aliases %}
+                                <li>{{ alias.type or 'alias' }} / {{ alias.name }}{% if alias.remarks %} / {{ alias.remarks }}{% endif %}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </details>
+                    {% endif %}
+                    {% if item.addresses %}
+                    <details>
+                        <summary>地址 {{ item.addresses|length }}</summary>
+                        <div class="detail-box">
+                            <ul class="plain-list">
+                                {% for addr in item.addresses %}
+                                <li>{{ addr.display }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </details>
+                    {% endif %}
+                    <div class="card-actions">
+                        {% if item.url %}
+                        <a class="text-link" href="{{ item.url }}" target="_blank">查看官方检索页</a>
+                        {% endif %}
+                        {% if item.source_url %}
+                        <a class="text-link" href="{{ item.source_url }}" target="_blank">查看名单来源</a>
+                        {% endif %}
+                    </div>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endif %}
+
+{% if grouped_results.other %}
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <p class="eyebrow">Other</p>
+            <h2>其他结果</h2>
+        </div>
+        <div class="result-grid">
+            {% for item in grouped_results.other %}
+            <article class="result-card other">
+                <div class="result-head">
+                    <span class="source-tag">{{ item.source_label }}</span>
+                    <span class="score-tag">相关度 {{ '%.2f'|format(item.score or 0) }}</span>
+                </div>
+                <h3>{{ item.title }}</h3>
+                <p class="muted">{{ item.published_at }}</p>
+                {% if item.summary %}
+                <p class="result-copy">{{ item.summary }}</p>
+                {% endif %}
+                <div class="card-footer">
+                    <div class="card-actions">
+                        {% if item.url %}
+                        <a class="text-link" href="{{ item.url }}" target="_blank">查看记录</a>
+                        {% endif %}
+                        {% if item.source_url %}
+                        <a class="text-link" href="{{ item.source_url }}" target="_blank">查看来源</a>
+                        {% endif %}
+                    </div>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endif %}
