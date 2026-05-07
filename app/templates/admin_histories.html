@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} | 管理员 / 历史{% endblock %}
+
+{% block content %}
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <div>
+                <p class="eyebrow">Admin Histories</p>
+                <h2>全站历史记录</h2>
+            </div>
+        </div>
+        <form class="tool-panel compact admin-filter-panel" method="get" action="/admin/histories">
+            <div class="admin-filter-grid">
+                <div>
+                    <label for="user_id">用户</label>
+                    <select id="user_id" name="user_id">
+                        <option value="">全部</option>
+                        {% for user in admin_users %}
+                        <option value="{{ user.id }}" {% if filters.user_id and filters.user_id == user.id %}selected{% endif %}>{{ user.username }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label for="query_type">类型</label>
+                    <input id="query_type" name="query_type" type="text" value="{{ filters.query_type or '' }}" />
+                </div>
+                <div>
+                    <label for="country">国家</label>
+                    <input id="country" name="country" type="text" value="{{ filters.country or '' }}" />
+                </div>
+                <div>
+                    <label for="court_level">法院级别</label>
+                    <input id="court_level" name="court_level" type="text" value="{{ filters.court_level or '' }}" />
+                </div>
+                <div>
+                    <label for="legal_type">法律类型</label>
+                    <input id="legal_type" name="legal_type" type="text" value="{{ filters.legal_type or '' }}" />
+                </div>
+                <div>
+                    <label for="rule_keyword">法律法规关键词</label>
+                    <input id="rule_keyword" name="rule_keyword" type="text" value="{{ filters.rule_keyword or '' }}" />
+                </div>
+                <div>
+                    <label for="start_date">开始时间</label>
+                    <input id="start_date" name="start_date" type="date" value="{{ filters.start_date or '' }}" />
+                </div>
+                <div>
+                    <label for="end_date">结束时间</label>
+                    <input id="end_date" name="end_date" type="date" value="{{ filters.end_date or '' }}" />
+                </div>
+            </div>
+            <div class="action-row">
+                <button type="submit">筛选记录</button>
+            </div>
+        </form>
+
+        <div class="table-card">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>用户</th>
+                        <th>时间</th>
+                        <th>类型</th>
+                        <th>内容</th>
+                        <th>国家</th>
+                        <th>法院级别</th>
+                        <th>法律类型</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in histories %}
+                    <tr>
+                        <td>{{ item.username }}</td>
+                        <td>{{ item.created_at }}</td>
+                        <td>{{ item.query_type }}</td>
+                        <td>{{ item.query_text }}</td>
+                        <td>{{ item.country }}</td>
+                        <td>{{ item.court_level or '-' }}</td>
+                        <td>{{ item.legal_type or '-' }}</td>
+                        <td><a class="text-link" href="/histories/{{ item.id }}/restore">恢复</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+{% endblock %}

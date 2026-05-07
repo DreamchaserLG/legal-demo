@@ -9,13 +9,15 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.database import engine
+from app.service.canada_legislation_service import sync_canada_legislation_by_keywords
 from app.service.canlii_service import sync_canlii_by_keywords, sync_canlii_demo
 from app.service.common_service import json_text, sha256_text, split_keywords
 from app.service.ofac_service import sync_ofac_by_keywords, sync_ofac_demo
 
 ACTIVE_TASK_STATUSES = {"queued", "running"}
 TERMINAL_TASK_STATUSES = {"completed", "failed"}
-VALID_SOURCES = {"all", "canlii", "ofac"}
+VALID_SOURCES = {"all", "canlii", "ofac", "canada"}
+CANADA_SOURCE_CODES = {"canlii", "ca_federal_act", "ca_federal_regulation", "on_statute", "on_regulation"}
 
 
 def _table_statements() -> list[str]:
@@ -139,9 +141,15 @@ def _count_local_matches(keywords: list[str], source_filter: str) -> int:
 
     source_clause = ""
     normalized_source = _normalize_source(source_filter)
-    if normalized_source in {"canlii", "ofac"}:
+    if normalized_source == "canlii":
         source_clause = "AND si.source_code = :source"
         params["source"] = normalized_source
+    elif normalized_source == "ofac":
+        source_clause = "AND si.source_code = :source"
+        params["source"] = normalized_source
+    elif normalized_source == "canada":
+        source_clause = "AND si.source_code = ANY(:canada_sources)"
+        params["canada_sources"] = list(CANADA_SOURCE_CODES)
 
     sql = f"""
     SELECT COUNT(*) AS total
@@ -155,10 +163,10 @@ def _count_local_matches(keywords: list[str], source_filter: str) -> int:
 
 def _status_label(status: str) -> str:
     mapping = {
-        "queued": "已排队",
-        "running": "抓取中",
-        "completed": "已完成",
-        "failed": "失败",
+        "queued": "Queued",
+        "running": "Hydrating",
+        "completed": "Completed",
+        "failed": "Failed",
     }
     return mapping.get(str(status or "").strip().lower(), str(status or "-"))
 
@@ -228,6 +236,17 @@ def _find_recent_terminal_task(conn, fingerprint: str, desired_count: int):
     return None
 
 
+def get_recent_terminal_hydration_task(*, keywords, source_filter: str, desired_count: int) -> dict | None:
+    normalized_keywords = _normalize_keywords(keywords)
+    if not normalized_keywords:
+        return None
+
+    fingerprint = _task_fingerprint(normalized_keywords, _normalize_source(source_filter))
+    with engine.connect() as conn:
+        row = _find_recent_terminal_task(conn, fingerprint, max(1, int(desired_count or 0)))
+    return _serialize_task(row)
+
+
 def enqueue_or_reuse_hydration_task(
     *,
     query_text: str,
@@ -250,7 +269,7 @@ def enqueue_or_reuse_hydration_task(
     desired_count = max(1, int(desired_count or 0))
     current_local_count = max(0, int(current_local_count or 0))
     fingerprint = _task_fingerprint(normalized_keywords, source_filter)
-    task_message = f"本地命中 {current_local_count} 条，低于目标 {desired_count} 条，已提交后台扩库任务。"
+    task_message = f"Queued hydration task. local={current_local_count}, target={desired_count}."
 
     with engine.begin() as conn:
         existing = _find_active_task(conn, fingerprint)
@@ -347,7 +366,7 @@ def _requeue_stale_running_tasks(conn):
             UPDATE ingestion_tasks
             SET status = 'queued',
                 claimed_by = NULL,
-                message = '检测到上一个 worker 心跳超时，任务已重新排队。',
+                message = 'Previous worker heartbeat timed out. Task re-queued.',
                 last_error = COALESCE(last_error, 'stale_worker_requeue')
             WHERE status = 'running'
               AND COALESCE(last_heartbeat, started_at, created_at) < :cutoff
@@ -391,7 +410,7 @@ def _claim_next_task(worker_name: str):
             {
                 "task_id": row["id"],
                 "claimed_by": worker_name,
-                "message": f"后台扩库已开始，当前 worker={worker_name}。",
+                "message": f"Hydration started. worker={worker_name}",
             },
         )
         return _serialize_task(_get_task_row_by_id(conn, row["id"]))
@@ -490,7 +509,16 @@ def _merge_remote_messages(source_results: list[dict]) -> str:
         for item in source_results
         if str(item.get("message") or "").strip()
     ]
-    return "；".join(messages)
+    return "; ".join(messages)
+
+
+def _can_run_bulk_sync(source_name: str) -> bool:
+    normalized = str(source_name or "").strip().lower()
+    if normalized == "ofac":
+        return bool(getattr(settings, "ofac_full_snapshot_enabled", True))
+    if normalized == "canlii":
+        return bool(getattr(settings, "canlii_bulk_sync_enabled", False))
+    return False
 
 
 def _source_stage_map(source_results: list[dict]) -> dict:
@@ -506,11 +534,17 @@ def _clear_runtime_caches():
     try:
         from app.service.analysis_service import clear_analysis_cache
         from app.service.agent_service import clear_prediction_cache
+        from app.service.bilingual_service import clear_bilingual_cache
+        from app.service.canada_case_law_service import bootstrap_canada_law_graph
+        from app.service.module_service import clear_module_cache
         from app.service.search_service import clear_search_cache
 
         clear_search_cache()
         clear_analysis_cache()
         clear_prediction_cache()
+        clear_bilingual_cache()
+        clear_module_cache()
+        bootstrap_canada_law_graph(force=True)
     except Exception:
         return
 
@@ -523,7 +557,11 @@ def _run_task(task: dict, worker_name: str):
     deficit = max(0, desired_count - current_local_count)
     source_results = []
 
-    if source_filter in {"all", "canlii"}:
+    if source_filter in {"all", "canada"}:
+        result = sync_canada_legislation_by_keywords(keywords, target_count=deficit or desired_count)
+        result["stage"] = "keyword"
+        source_results.append(result)
+    if source_filter in {"all", "canlii", "canada"}:
         result = sync_canlii_by_keywords(keywords, target_count=deficit or desired_count)
         result["stage"] = "keyword"
         source_results.append(result)
@@ -537,7 +575,7 @@ def _run_task(task: dict, worker_name: str):
     _update_task_progress(
         int(task["id"]),
         worker_name=worker_name,
-        message=_merge_remote_messages(source_results) or "关键词补抓已完成，正在评估是否需要补充批量同步。",
+        message=_merge_remote_messages(source_results) or "Keyword hydration finished. Evaluating snapshot sync.",
         items_processed=processed,
         sources=sources,
     )
@@ -546,11 +584,11 @@ def _run_task(task: dict, worker_name: str):
     remaining = max(0, desired_count - total_after_keyword)
     if remaining > 0:
         bulk_results = []
-        if source_filter in {"all", "canlii"}:
+        if source_filter in {"all", "canlii", "canada"} and _can_run_bulk_sync("canlii"):
             result = sync_canlii_demo()
             result["stage"] = "bulk"
             bulk_results.append(result)
-        if source_filter in {"all", "ofac"}:
+        if source_filter in {"all", "ofac"} and _can_run_bulk_sync("ofac"):
             result = sync_ofac_demo()
             result["stage"] = "bulk"
             bulk_results.append(result)
@@ -560,16 +598,16 @@ def _run_task(task: dict, worker_name: str):
         _update_task_progress(
             int(task["id"]),
             worker_name=worker_name,
-            message=_merge_remote_messages(source_results) or "批量同步已完成，正在统计本地命中。",
+            message=_merge_remote_messages(source_results) or "Snapshot sync finished. Recounting local matches.",
             items_processed=processed,
             sources=sources,
         )
 
     result_total_after = _count_local_matches(keywords, source_filter)
     if processed > 0:
-        message = f"后台扩库已完成，累计处理 {processed} 条记录，本地当前可命中 {result_total_after} 条。"
+        message = f"Hydration completed. processed={processed}, local_matches={result_total_after}."
     else:
-        message = f"后台扩库已完成，但没有补到新的匹配记录。本地当前仍为 {result_total_after} 条。"
+        message = f"Hydration completed with no new matching records. local_matches={result_total_after}."
 
     _complete_task(
         int(task["id"]),
@@ -594,7 +632,7 @@ def process_next_ingestion_task(worker_name: str | None = None) -> bool:
         _fail_task(
             int(task["id"]),
             worker_name=resolved_worker_name,
-            message="后台扩库失败，任务已终止。",
+            message="Hydration failed. Task terminated.",
             error=str(exc),
         )
     return True

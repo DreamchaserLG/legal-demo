@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} | 管理员 / 法规{% endblock %}
+
+{% block content %}
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <div>
+                <p class="eyebrow">Admin Rules</p>
+                <h2>数据库中的全部法律法规</h2>
+            </div>
+        </div>
+        <form class="tool-panel compact admin-filter-panel" method="get" action="/admin/rules">
+            <div class="admin-filter-grid">
+                <div>
+                    <label for="country">国家</label>
+                    <input id="country" name="country" type="text" value="{{ filters.country or '' }}" />
+                </div>
+                <div>
+                    <label for="legal_type">法律类型</label>
+                    <input id="legal_type" name="legal_type" type="text" value="{{ filters.legal_type or '' }}" />
+                </div>
+                <div>
+                    <label for="article_no">条文编号</label>
+                    <input id="article_no" name="article_no" type="text" value="{{ filters.article_no or '' }}" />
+                </div>
+                <div>
+                    <label for="keyword">关键词</label>
+                    <input id="keyword" name="keyword" type="text" value="{{ filters.keyword or '' }}" />
+                </div>
+            </div>
+            <div class="action-row">
+                <button type="submit">筛选法规</button>
+            </div>
+        </form>
+
+        <div class="stack-grid">
+            {% for item in rules %}
+            <article class="law-mini-card law-mini-card-admin">
+                <div class="result-head">
+                    <span class="source-tag">{{ item.legal_type or "Law" }}</span>
+                    <span class="meta-inline">关联案例 {{ item.related_case_count or 0 }}</span>
+                </div>
+                <h3>{{ item.title }}</h3>
+                <div class="chip-row">
+                    <span class="chip">{{ item.country }}</span>
+                    {% if item.article_no %}
+                    <span class="chip">{{ item.article_no }}</span>
+                    {% endif %}
+                    {% if item.rule_level %}
+                    <span class="chip">{{ item.rule_level }}</span>
+                    {% endif %}
+                </div>
+                {% if item.article_summary %}
+                <p class="result-copy">{{ item.article_summary }}</p>
+                {% endif %}
+                <div class="card-actions">
+                    {% if item.slug %}
+                    <a class="text-link" href="/law/canada/{{ item.slug }}">法规详情</a>
+                    {% endif %}
+                    {% if item.source_url %}
+                    <a class="text-link" href="{{ item.source_url }}" target="_blank">来源链接</a>
+                    {% endif %}
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}

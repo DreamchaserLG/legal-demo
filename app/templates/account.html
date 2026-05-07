@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} | 我的记录{% endblock %}
+
+{% block content %}
+<section class="hero hero-results">
+    <div class="shell hero-grid detail-grid">
+        <div class="hero-copy">
+            <p class="eyebrow">My Account</p>
+            <h1>{{ account_user.real_name or account_user.username }}</h1>
+            <p class="hero-text">这里可以维护你的基本信息，并查看最近的查询记录。</p>
+        </div>
+        <form class="tool-panel compact" method="post" action="/account/profile">
+            <label for="real_name">姓名</label>
+            <input id="real_name" name="real_name" type="text" value="{{ account_user.real_name or '' }}" />
+            <label for="phone">电话</label>
+            <input id="phone" name="phone" type="text" value="{{ account_user.phone or '' }}" />
+            <label for="organization">机构</label>
+            <input id="organization" name="organization" type="text" value="{{ account_user.organization or '' }}" />
+            <label for="country_preference">国家偏好</label>
+            <input id="country_preference" name="country_preference" type="text" value="{{ account_user.country_preference or '' }}" />
+            <label for="legal_type_preference">法律类型偏好</label>
+            <input id="legal_type_preference" name="legal_type_preference" type="text" value="{{ account_user.legal_type_preference or '' }}" />
+            <label for="note">备注</label>
+            <textarea id="note" name="note" rows="4">{{ account_user.note or '' }}</textarea>
+            <div class="action-row">
+                <button type="submit">保存资料</button>
+            </div>
+        </form>
+    </div>
+</section>
+
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <div>
+                <p class="eyebrow">Recent Histories</p>
+                <h2>最近查询记录</h2>
+            </div>
+            <a class="pager-link secondary" href="/histories">查看全部历史</a>
+        </div>
+        {% if histories %}
+        <div class="history-grid">
+            {% for item in histories %}
+            <article class="history-card">
+                <div class="history-head">
+                    <span class="source-tag">{{ item.query_type }}</span>
+                    <span class="meta-inline">{{ item.created_at }}</span>
+                </div>
+                <p class="memo-copy">{{ item.query_text }}</p>
+                <div class="chip-row">
+                    {% if item.country %}
+                    <span class="chip">{{ item.country }}</span>
+                    {% endif %}
+                    {% if item.court_level %}
+                    <span class="chip">{{ item.court_level }}</span>
+                    {% endif %}
+                    {% if item.legal_type %}
+                    <span class="chip">{{ item.legal_type }}</span>
+                    {% endif %}
+                </div>
+                <div class="card-actions">
+                    <a class="text-link" href="/histories/{{ item.id }}/restore">恢复本次结果</a>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <h2>当前还没有历史记录</h2>
+            <p>进行一次检索、分析或预测后，这里会自动保存记录。</p>
+        </div>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

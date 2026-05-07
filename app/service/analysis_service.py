@@ -7,11 +7,19 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import engine, fetch_all
+from app.service.bilingual_service import build_bilingual_analysis_pack
+from app.service.common_service import repair_text
 from app.service.llm_service import (
     LLMServiceError,
     create_structured_response,
     get_llm_provider,
     is_llm_configured,
+)
+from app.service.module_service import (
+    build_module_packet,
+    get_module_definition,
+    normalize_module,
+    resolve_source_for_module,
 )
 from app.service.search_service import search_with_remote_hydration
 
@@ -36,8 +44,10 @@ RELIEF_MARKERS = {
 
 ISSUE_MARKERS = {
     "whether", "validity", "breach", "oppression", "inheritance", "liability",
-    "ownership", "division", "trust", "fiduciary", "sanction",
+    "ownership", "division", "trust", "fiduciary", "sanction", "privacy",
+    "consent", "data", "deletion", "contract", "dismissal", "removal",
     "是否", "效力", "责任", "继承", "侵权", "违约", "所有权", "分割", "信托", "制裁",
+    "隐私", "同意", "删除", "除名", "申诉",
 }
 
 RETRYABLE_ERROR_CATEGORIES = {"timeout", "network", "invalid_json", "provider_busy"}
@@ -114,14 +124,14 @@ def clear_analysis_cache():
 
 
 def _safe_excerpt(text: str, limit: int = 140) -> str:
-    raw = str(text or "").strip().replace("\n", " ")
+    raw = repair_text(text).replace("\n", " ")
     if len(raw) <= limit:
         return raw
     return raw[:limit] + "..."
 
 
 def extract_search_keywords(text: str, max_keywords: int = 8) -> list[str]:
-    source_text = str(text or "").strip()
+    source_text = repair_text(text)
     if not source_text:
         return []
 
@@ -135,7 +145,8 @@ def extract_search_keywords(text: str, max_keywords: int = 8) -> list[str]:
         if left != right
     ]
 
-    ordered_terms = phrase_terms + english_terms + chinese_tokens
+    phrase_budget = max(1, max_keywords // 2)
+    ordered_terms = phrase_terms[:phrase_budget] + english_terms + chinese_tokens + phrase_terms[phrase_budget:]
 
     result = []
     seen = set()
@@ -152,18 +163,18 @@ def extract_search_keywords(text: str, max_keywords: int = 8) -> list[str]:
 
 
 def _split_clauses(text: str) -> list[str]:
-    chunks = re.split(r"[。！？；;\n]+|(?<=[.!?])\s+", str(text or "").strip())
+    chunks = re.split(r"[。！？；;\n]+|(?<=[.!?])\s+", repair_text(text))
     return [chunk.strip(" ,;，；") for chunk in chunks if chunk.strip(" ,;，；")]
 
 
 def _contains_marker(text: str, markers: set[str]) -> bool:
-    raw_text = str(text or "")
+    raw_text = repair_text(text)
     lowered = raw_text.lower()
     return any(marker in raw_text or marker in lowered for marker in markers)
 
 
 def _join_clauses(clauses: list[str], limit: int | None = None) -> str:
-    values = [str(item or "").strip() for item in clauses if str(item or "").strip()]
+    values = [repair_text(item) for item in clauses if repair_text(item)]
     if limit:
         values = values[:limit]
     return "; ".join(values)
@@ -185,7 +196,7 @@ def _normalize_string_list(values, limit: int | None = None) -> list[str]:
     normalized = []
     seen = set()
     for value in values or []:
-        text_value = str(value or "").strip()
+        text_value = repair_text(value)
         key = text_value.lower()
         if not text_value or key in seen:
             continue
@@ -197,23 +208,23 @@ def _normalize_string_list(values, limit: int | None = None) -> list[str]:
 
 
 def build_intake_outline(analysis: dict) -> dict:
-    facts = str(analysis.get("facts") or analysis.get("summary") or "").strip()
+    facts = repair_text(analysis.get("facts") or analysis.get("summary") or "")
     issues = _normalize_string_list(
         analysis.get("disputed_issues") or analysis.get("claims") or analysis.get("legal_topics"),
         limit=6,
     )
     keywords = _normalize_string_list(analysis.get("search_keywords"), limit=8)
-
     return {
         "facts": facts,
         "disputed_issues": issues,
-        "requested_relief": str(analysis.get("requested_relief") or "").strip(),
+        "requested_relief": repair_text(analysis.get("requested_relief") or ""),
         "keywords": keywords,
     }
 
 
-def build_local_analysis(text: str) -> dict:
-    cleaned = str(text or "").strip()
+def build_local_analysis(text: str, module: str = "canada") -> dict:
+    cleaned = repair_text(text)
+    normalized_module = normalize_module(module)
     keywords = extract_search_keywords(cleaned)
     clauses = _split_clauses(cleaned)
     requested_relief = _build_fallback_relief(clauses)
@@ -223,16 +234,34 @@ def build_local_analysis(text: str) -> dict:
     facts = _join_clauses(fact_clauses, limit=3) or cleaned[:240]
     disputed_issues = _build_fallback_issues(clauses, keywords)
 
+    jurisdiction = "Canada" if normalized_module == "canada" else "United States / OFAC"
+    legal_topics = keywords[:4]
+    if normalized_module == "us_sanctions":
+        legal_topics = _normalize_string_list(
+            keywords[:3] + ["OFAC sanctions", "delisting petition", "specific license"],
+            limit=6,
+        )
+        if "company sanctions" not in {item.lower() for item in legal_topics}:
+            legal_topics.insert(0, "company sanctions")
+        risk_flags = [
+            "先确认命中的到底是真实主体，还是名称相近、控制关系或受益所有人层面的误判。",
+            "如果涉及冻结资金、受限交易或疑似协助规避制裁，通常需要把除名与许可证路径并行评估。",
+        ]
+    else:
+        risk_flags = [
+            "先区分应优先依赖国家/联邦层面的裁判，还是省级/地方层面的裁判，否则检索顺序会失真。",
+        ]
+
     return {
         "facts": facts or cleaned[:240],
         "disputed_issues": disputed_issues,
         "requested_relief": requested_relief,
         "search_keywords": keywords,
         "summary": cleaned[:240],
-        "jurisdiction": "",
-        "legal_topics": keywords[:4],
+        "jurisdiction": jurisdiction,
+        "legal_topics": legal_topics,
         "claims": disputed_issues[:4],
-        "risk_flags": [],
+        "risk_flags": risk_flags,
     }
 
 
@@ -322,14 +351,15 @@ def _history_similarity_threshold() -> float:
     return 0.3
 
 
-def _fetch_history_candidates(text_input: str, limit: int = 4) -> list[dict]:
-    cleaned = str(text_input or "").strip()
+def _fetch_history_candidates(text_input: str, module_code: str, limit: int = 4) -> list[dict]:
+    cleaned = repair_text(text_input)
     if not cleaned:
         return []
     sql = """
     SELECT
         id,
         input_text,
+        module_code,
         source_filter,
         sort_mode,
         extracted_keywords,
@@ -338,8 +368,11 @@ def _fetch_history_candidates(text_input: str, limit: int = 4) -> list[dict]:
         created_at,
         similarity(LOWER(input_text), LOWER(:input_text)) AS similarity_score
     FROM agent_runs
-    WHERE LOWER(input_text) = LOWER(:input_text)
-       OR similarity(LOWER(input_text), LOWER(:input_text)) >= :threshold
+    WHERE module_code = :module_code
+      AND (
+            LOWER(input_text) = LOWER(:input_text)
+         OR similarity(LOWER(input_text), LOWER(:input_text)) >= :threshold
+      )
     ORDER BY
         CASE WHEN LOWER(input_text) = LOWER(:input_text) THEN 1 ELSE 0 END DESC,
         similarity_score DESC,
@@ -351,6 +384,7 @@ def _fetch_history_candidates(text_input: str, limit: int = 4) -> list[dict]:
             sql,
             {
                 "input_text": cleaned,
+                "module_code": normalize_module(module_code),
                 "threshold": _history_similarity_threshold(),
                 "limit": max(1, int(limit)),
             },
@@ -360,12 +394,13 @@ def _fetch_history_candidates(text_input: str, limit: int = 4) -> list[dict]:
 
 
 def _build_history_matches(text_input: str, rows: list[dict]) -> list[dict]:
-    cleaned = str(text_input or "").strip().lower()
+    cleaned = repair_text(text_input).lower()
     matches = []
     for row in rows:
         structured = row.get("structured_analysis") or {}
         analysis = structured.get("analysis") or {}
         intake_outline = structured.get("intake_outline") or {}
+        bilingual_context = structured.get("bilingual_context") or {}
         similarity = max(0.0, min(float(row.get("similarity_score") or 0.0), 1.0))
         keywords = _normalize_string_list(
             row.get("extracted_keywords") or intake_outline.get("keywords") or analysis.get("search_keywords"),
@@ -374,7 +409,8 @@ def _build_history_matches(text_input: str, rows: list[dict]) -> list[dict]:
         matches.append(
             {
                 "run_id": row.get("id"),
-                "is_exact": str(row.get("input_text") or "").strip().lower() == cleaned,
+                "module_code": row.get("module_code", "canada"),
+                "is_exact": repair_text(row.get("input_text")).lower() == cleaned,
                 "similarity": round(similarity, 2),
                 "source_filter": row.get("source_filter", "all"),
                 "sort_mode": row.get("sort_mode", "relevance"),
@@ -382,7 +418,14 @@ def _build_history_matches(text_input: str, rows: list[dict]) -> list[dict]:
                 "created_at": str(row.get("created_at") or "")[:19],
                 "input_excerpt": _safe_excerpt(row.get("input_text")),
                 "summary": _safe_excerpt(
-                    analysis.get("summary")
+                    bilingual_context.get("summary", {}).get("zh")
+                    or analysis.get("summary")
+                    or intake_outline.get("facts")
+                    or row.get("input_text")
+                ),
+                "summary_en": _safe_excerpt(
+                    bilingual_context.get("summary", {}).get("en")
+                    or analysis.get("summary")
                     or intake_outline.get("facts")
                     or row.get("input_text")
                 ),
@@ -392,19 +435,26 @@ def _build_history_matches(text_input: str, rows: list[dict]) -> list[dict]:
     return matches
 
 
-def _reuse_structured_analysis_from_history(text_input: str, rows: list[dict]) -> dict | None:
-    cleaned = str(text_input or "").strip().lower()
+def _reuse_structured_analysis_from_history(text_input: str, rows: list[dict], module_code: str) -> dict | None:
+    cleaned = repair_text(text_input).lower()
+    normalized_module = normalize_module(module_code)
     for row in rows:
-        if str(row.get("input_text") or "").strip().lower() != cleaned:
+        if str(row.get("module_code") or "").strip().lower() != normalized_module:
+            continue
+        if repair_text(row.get("input_text")).lower() != cleaned:
             continue
         structured = row.get("structured_analysis") or {}
         analysis = structured.get("analysis") or {}
         if not analysis:
             continue
         intake_outline = structured.get("intake_outline") or build_intake_outline(analysis)
+        bilingual_context = structured.get("bilingual_context") or build_bilingual_analysis_pack(text_input, analysis, normalized_module)
         return {
             "analysis": analysis,
             "intake_outline": intake_outline,
+            "bilingual_context": bilingual_context,
+            "retrieval_keywords": bilingual_context.get("retrieval_keywords") or intake_outline.get("keywords", []),
+            "query_language": bilingual_context.get("query_language", "zh"),
             "analysis_mode": "history_reuse",
             "analysis_error": "",
             "analysis_error_category": "",
@@ -429,6 +479,10 @@ def _persist_analysis_run(payload: dict):
         "analysis_attempt_log": payload.get("analysis_attempt_log", []),
         "coverage_note": payload.get("coverage_note", ""),
         "history_matches": payload.get("history_matches", []),
+        "module_packet": payload.get("module_packet", {}),
+        "bilingual_context": payload.get("bilingual_context", {}),
+        "query_language": payload.get("query_language", "zh"),
+        "source_effective": payload.get("source", "all"),
     }
 
     try:
@@ -438,6 +492,7 @@ def _persist_analysis_run(payload: dict):
                     """
                     INSERT INTO agent_runs (
                         input_text,
+                        module_code,
                         source_filter,
                         sort_mode,
                         extracted_keywords,
@@ -446,6 +501,7 @@ def _persist_analysis_run(payload: dict):
                     )
                     VALUES (
                         :input_text,
+                        :module_code,
                         :source_filter,
                         :sort_mode,
                         :extracted_keywords,
@@ -456,6 +512,7 @@ def _persist_analysis_run(payload: dict):
                 ),
                 {
                     "input_text": payload.get("input_text", ""),
+                    "module_code": payload.get("module_code", "canada"),
                     "source_filter": payload.get("source", "all"),
                     "sort_mode": payload.get("sort", "relevance"),
                     "extracted_keywords": payload.get("extracted_keywords", []),
@@ -467,15 +524,19 @@ def _persist_analysis_run(payload: dict):
         return
 
 
-def build_structured_analysis(text: str) -> dict:
-    cleaned = str(text or "").strip()
-    fallback = build_local_analysis(cleaned)
+def build_structured_analysis(text: str, module: str = "canada") -> dict:
+    cleaned = repair_text(text)
+    normalized_module = normalize_module(module)
+    fallback = build_local_analysis(cleaned, normalized_module)
 
     if not cleaned:
-        analysis = fallback
+        bilingual_context = build_bilingual_analysis_pack(cleaned, fallback, normalized_module)
         return {
-            "analysis": analysis,
-            "intake_outline": build_intake_outline(analysis),
+            "analysis": fallback,
+            "intake_outline": build_intake_outline(fallback),
+            "bilingual_context": bilingual_context,
+            "retrieval_keywords": bilingual_context.get("retrieval_keywords") or fallback.get("search_keywords", []),
+            "query_language": bilingual_context.get("query_language", "zh"),
             "analysis_mode": "empty",
             "analysis_error": "",
             "analysis_error_category": "",
@@ -485,11 +546,31 @@ def build_structured_analysis(text: str) -> dict:
             "llm_response_id": "",
         }
 
-    if not is_llm_configured():
-        analysis = fallback
+    if bool(getattr(settings, "analysis_local_fast_mode", True)):
+        bilingual_context = build_bilingual_analysis_pack(cleaned, fallback, normalized_module)
         return {
-            "analysis": analysis,
-            "intake_outline": build_intake_outline(analysis),
+            "analysis": fallback,
+            "intake_outline": build_intake_outline(fallback),
+            "bilingual_context": bilingual_context,
+            "retrieval_keywords": bilingual_context.get("retrieval_keywords") or fallback.get("search_keywords", []),
+            "query_language": bilingual_context.get("query_language", "zh"),
+            "analysis_mode": "local_fast",
+            "analysis_error": "",
+            "analysis_error_category": "",
+            "analysis_attempt_log": [],
+            "llm_configured": is_llm_configured(),
+            "llm_model": "local",
+            "llm_response_id": "",
+        }
+
+    if not is_llm_configured():
+        bilingual_context = build_bilingual_analysis_pack(cleaned, fallback, normalized_module)
+        return {
+            "analysis": fallback,
+            "intake_outline": build_intake_outline(fallback),
+            "bilingual_context": bilingual_context,
+            "retrieval_keywords": bilingual_context.get("retrieval_keywords") or fallback.get("search_keywords", []),
+            "query_language": bilingual_context.get("query_language", "zh"),
             "analysis_mode": "heuristic",
             "analysis_error": f"LLM credentials are not configured for provider={get_llm_provider()}.",
             "analysis_error_category": "configuration",
@@ -499,19 +580,31 @@ def build_structured_analysis(text: str) -> dict:
             "llm_response_id": "",
         }
 
-    instructions = (
-        "You are a legal intake analyst. Split the user's event into four core parts before retrieval: "
-        "facts, disputed issues, requested relief, and 4 to 8 search keywords. "
-        "Also provide a concise summary, likely jurisdiction, legal topics, claims, and risk flags. "
-        "Keep close to the user's facts. Do not invent case citations, statutes, or outcomes."
-    )
+    if normalized_module == "us_sanctions":
+        instructions = (
+            "You are assisting with a U.S. sanctions research module focused only on companies that are sanctioned, "
+            "their possible delisting path, the reasons for designation, and the procedures for reconsideration or licensing. "
+            "Split the user's event into facts, disputed issues, requested relief, and 4 to 8 search keywords. "
+            "Also provide a concise summary, likely jurisdiction, legal topics, claims, and risk flags. "
+            "Keep close to the user's facts. Do not invent cases, statutes, or outcomes."
+        )
+    else:
+        instructions = (
+            "You are a Canadian legal intake analyst. Split the user's event into four core parts before retrieval: "
+            "facts, disputed issues, requested relief, and 4 to 8 search keywords. "
+            "Also provide a concise summary, likely jurisdiction, legal topics, claims, and risk flags. "
+            "Keep close to the user's facts. Do not invent case citations, statutes, or outcomes."
+        )
 
     model_call = _call_analysis_model(cleaned, instructions)
     if not model_call["ok"]:
-        analysis = fallback
+        bilingual_context = build_bilingual_analysis_pack(cleaned, fallback, normalized_module)
         return {
-            "analysis": analysis,
-            "intake_outline": build_intake_outline(analysis),
+            "analysis": fallback,
+            "intake_outline": build_intake_outline(fallback),
+            "bilingual_context": bilingual_context,
+            "retrieval_keywords": bilingual_context.get("retrieval_keywords") or fallback.get("search_keywords", []),
+            "query_language": bilingual_context.get("query_language", "zh"),
             "analysis_mode": "heuristic_fallback",
             "analysis_error": model_call["error_message"],
             "analysis_error_category": model_call["error_category"],
@@ -527,15 +620,19 @@ def build_structured_analysis(text: str) -> dict:
     analysis["disputed_issues"] = _normalize_string_list(analysis.get("disputed_issues"), limit=6) or fallback["disputed_issues"]
     analysis["legal_topics"] = _normalize_string_list(analysis.get("legal_topics"), limit=6) or fallback["legal_topics"]
     analysis["claims"] = _normalize_string_list(analysis.get("claims"), limit=6) or analysis["disputed_issues"]
-    analysis["risk_flags"] = _normalize_string_list(analysis.get("risk_flags"), limit=6)
-    analysis["facts"] = str(analysis.get("facts") or analysis.get("summary") or fallback["facts"]).strip()
-    analysis["requested_relief"] = str(analysis.get("requested_relief") or fallback["requested_relief"]).strip()
-    analysis["summary"] = str(analysis.get("summary") or analysis["facts"][:240]).strip()
-    analysis["jurisdiction"] = str(analysis.get("jurisdiction") or "").strip()
+    analysis["risk_flags"] = _normalize_string_list(analysis.get("risk_flags"), limit=6) or fallback["risk_flags"]
+    analysis["facts"] = repair_text(analysis.get("facts") or analysis.get("summary") or fallback["facts"])
+    analysis["requested_relief"] = repair_text(analysis.get("requested_relief") or fallback["requested_relief"])
+    analysis["summary"] = repair_text(analysis.get("summary") or analysis["facts"][:240])
+    analysis["jurisdiction"] = repair_text(analysis.get("jurisdiction") or fallback["jurisdiction"])
 
+    bilingual_context = build_bilingual_analysis_pack(cleaned, analysis, normalized_module)
     return {
         "analysis": analysis,
         "intake_outline": build_intake_outline(analysis),
+        "bilingual_context": bilingual_context,
+        "retrieval_keywords": bilingual_context.get("retrieval_keywords") or analysis.get("search_keywords", []),
+        "query_language": bilingual_context.get("query_language", "zh"),
         "analysis_mode": "model",
         "analysis_error": "",
         "analysis_error_category": "",
@@ -546,48 +643,148 @@ def build_structured_analysis(text: str) -> dict:
     }
 
 
+def _build_retrieval_summary(module_packet: dict, keywords: list[str]) -> dict:
+    packet = module_packet or {}
+    laws = packet.get("relevant_laws") or []
+    case_rows = packet.get("case_law_rows") or []
+    grouped_laws = [
+        law
+        for law in laws
+        if (law.get("case_columns") or law.get("related_cases") or law.get("linked_case_count"))
+    ]
+    return {
+        "strategy": "local_keyword_relation",
+        "keywords": _normalize_string_list(keywords, limit=10),
+        "law_count": len(laws),
+        "grouped_law_count": len(grouped_laws),
+        "case_count": len(case_rows),
+    }
+
+
+def _dynamic_new_case_target_count(limit: int) -> int:
+    normalized_limit = max(1, int(limit or 1))
+    configured = int(getattr(settings, "analysis_new_case_target_count", 0) or 0)
+    if configured > 0:
+        return max(normalized_limit, configured)
+    buffer = max(4, min(12, normalized_limit))
+    hard_cap = max(normalized_limit, int(getattr(settings, "remote_search_max_items_per_source", 12)) * 2)
+    return min(hard_cap, normalized_limit + buffer)
+
+
 def analyze_sentence_search(
     text: str,
     limit: int = 30,
     offset: int = 0,
     source: str = "all",
     sort: str = "relevance",
+    module: str = "canada",
     refresh: bool = False,
     origin_page: str = "analyze",
+    local_only: bool = True,
 ):
-    cache_key = ("analyze", str(text or "").strip(), int(limit), int(offset), str(source or "all"), str(sort or "relevance"))
+    normalized_module = normalize_module(module)
+    cleaned_text = repair_text(text)
+    effective_source = resolve_source_for_module(normalized_module, source)
+    cache_key = ("analyze-structured", normalized_module, cleaned_text.lower())
+    analysis_cache_status = "miss"
+    structured = None
     if not refresh:
-        cached = _get_cached_analysis(cache_key)
-        if cached is not None:
-            return cached
+        structured = _get_cached_analysis(cache_key)
+        if structured is not None:
+            analysis_cache_status = "hit"
 
-    history_rows = _fetch_history_candidates(text)
-    history_matches = _build_history_matches(text, history_rows)
-    structured = _reuse_structured_analysis_from_history(text, history_rows) or build_structured_analysis(text)
+    history_rows = _fetch_history_candidates(cleaned_text, normalized_module)
+    history_matches = _build_history_matches(cleaned_text, history_rows)
+    has_exact_history = any(
+        repair_text(row.get("input_text")).lower() == cleaned_text.lower()
+        and str(row.get("module_code") or "").strip().lower() == normalized_module
+        for row in history_rows
+    )
+    is_new_case = not has_exact_history
+    new_case_hydration_enabled = bool(getattr(settings, "analysis_new_case_hydration_enabled", True)) and not local_only
+    new_case_target_count = _dynamic_new_case_target_count(limit)
+
+    if structured is None:
+        structured = (
+            _reuse_structured_analysis_from_history(cleaned_text, history_rows, normalized_module)
+            or build_structured_analysis(cleaned_text, normalized_module)
+        )
+        _set_cached_analysis(cache_key, structured)
+
     analysis = structured["analysis"]
     intake_outline = structured["intake_outline"]
+    bilingual_context = structured.get("bilingual_context", {})
+    query_language = structured.get("query_language", "zh")
     extracted_keywords = intake_outline.get("keywords", [])
+    retrieval_keywords = structured.get("retrieval_keywords") or extracted_keywords
 
-    result = search_with_remote_hydration(
-        extracted_keywords,
-        limit=limit,
-        offset=offset,
-        source=source,
-        sort=sort,
-        refresh=refresh,
-        origin_page=origin_page,
-    )
+    if local_only and bool(getattr(settings, "analysis_local_fast_mode", True)):
+        result = {
+            "input_text": cleaned_text,
+            "keywords": retrieval_keywords,
+            "total": 0,
+            "page_count": 0,
+            "offset": offset,
+            "source": effective_source,
+            "sort": sort,
+            "module_code": normalized_module,
+            "module_profile": get_module_definition(normalized_module),
+            "query_language": query_language,
+            "bilingual_query": {},
+            "results": [],
+            "grouped_results": {"legislation": [], "canlii": [], "ofac": [], "other": []},
+            "source_counts": {"legislation": 0, "canlii": 0, "ofac": 0, "other": 0},
+            "has_previous": False,
+            "has_next": False,
+            "previous_offset": 0,
+            "next_offset": 0,
+            "cache_status": "miss",
+            "remote_fetch": {
+                "status": "local_only",
+                "processed": 0,
+                "sources": {},
+                "message": "当前分析仅使用本地数据库匹配，不会实时访问远程网页。",
+            },
+            "search_strategy": "local_only_fast",
+            "hydration_target_count": limit,
+            "force_hydration": False,
+            "hydration_reason": "",
+        }
+    else:
+        result = search_with_remote_hydration(
+            retrieval_keywords,
+            limit=limit,
+            offset=offset,
+            source=effective_source,
+            sort=sort,
+            module=normalized_module,
+            refresh=True,
+            origin_page=origin_page,
+            force_hydration=is_new_case and new_case_hydration_enabled,
+            hydration_target_count=new_case_target_count if is_new_case and new_case_hydration_enabled else limit,
+            hydration_reason="new_case_enrichment" if is_new_case and new_case_hydration_enabled else "",
+            display_language=query_language,
+            local_only=local_only,
+        )
 
     coverage_note = ""
     if not result["total"]:
-        coverage_note = (
-            "当前本地库没有命中提取出的关键词。系统会优先返回现有结果；如果可扩库，会在后台继续补抓并回写本地。"
-        )
+        if local_only:
+            coverage_note = "当前分析仅基于本地数据库中的案例、法律法规和既有关联关系完成，不会实时抓取远程网页。"
+        elif normalized_module == "us_sanctions":
+            coverage_note = "当前已经完成关键词提取并检索 OFAC 本地材料，但暂时没有命中对应的公司记录或程序材料。"
+        else:
+            coverage_note = "当前已经根据提取出的关键词完成检索，但本地加拿大案例材料里暂时没有命中结果。"
 
     response_payload = {
-        "input_text": str(text or "").strip(),
+        "input_text": cleaned_text,
+        "module_code": normalized_module,
+        "module_profile": get_module_definition(normalized_module),
+        "query_language": query_language,
+        "source": effective_source,
         "analysis": analysis,
         "intake_outline": intake_outline,
+        "bilingual_context": bilingual_context,
         "analysis_mode": structured.get("analysis_mode", "heuristic"),
         "analysis_error": structured.get("analysis_error", ""),
         "analysis_error_category": structured.get("analysis_error_category", ""),
@@ -599,13 +796,29 @@ def analyze_sentence_search(
         "history_match_id": structured.get("history_match_id"),
         "history_similarity": structured.get("history_similarity", 0),
         "history_matches": history_matches,
+        "is_new_case": is_new_case,
+        "new_case_hydration_enabled": is_new_case and new_case_hydration_enabled,
+        "new_case_hydration_target_count": new_case_target_count if is_new_case and new_case_hydration_enabled else 0,
         "extracted_keywords": extracted_keywords,
+        "retrieval_keywords": retrieval_keywords,
         "coverage_note": coverage_note,
-        "analysis_cache_status": "miss",
+        "analysis_cache_status": analysis_cache_status,
         **result,
     }
+    response_payload["module_packet"] = build_module_packet(
+        normalized_module,
+        response_payload,
+        refresh=refresh,
+    )
+    response_payload["retrieval_summary"] = _build_retrieval_summary(
+        response_payload["module_packet"],
+        retrieval_keywords,
+    )
 
-    if not structured.get("history_reused") and structured.get("analysis_mode") != "heuristic_fallback":
+    if (
+        analysis_cache_status != "hit"
+        and not structured.get("history_reused")
+        and structured.get("analysis_mode") != "heuristic_fallback"
+    ):
         _persist_analysis_run(response_payload)
-    _set_cached_analysis(cache_key, response_payload)
     return response_payload

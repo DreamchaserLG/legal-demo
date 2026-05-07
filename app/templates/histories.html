@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} | 历史记录{% endblock %}
+
+{% block content %}
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <div>
+                <p class="eyebrow">Histories</p>
+                <h2>我的案件历史记录</h2>
+                <p class="notice-text">同一案情会自动去重，只保留一条有效历史记录。你可以在这里查看列表，也可以切换到图谱视图。</p>
+            </div>
+            <div class="history-view-switch">
+                <a class="pager-link secondary" href="/histories">列表视图</a>
+                <a class="pager-link" href="/histories/graph">图谱视图</a>
+            </div>
+        </div>
+
+        <form class="tool-panel compact admin-filter-panel" method="get" action="/histories">
+            <div class="admin-filter-grid history-filter-grid">
+                <div>
+                    <label for="case_type">案件类型</label>
+                    <input id="case_type" name="case_type" type="text" value="{{ filters.case_type or '' }}" placeholder="合同 / 劳动 / 侵权" />
+                </div>
+                <div>
+                    <label for="country">国家</label>
+                    <input id="country" name="country" type="text" value="{{ filters.country or '' }}" placeholder="Canada" />
+                </div>
+                <div>
+                    <label for="court_level">法院级别</label>
+                    <input id="court_level" name="court_level" type="text" value="{{ filters.court_level or '' }}" />
+                </div>
+                <div>
+                    <label for="legal_type">法律类型</label>
+                    <input id="legal_type" name="legal_type" type="text" value="{{ filters.legal_type or '' }}" />
+                </div>
+            </div>
+            <div class="action-row">
+                <button type="submit">筛选记录</button>
+                <a class="pager-link secondary" href="/analysis">新建案情分析</a>
+            </div>
+        </form>
+
+        {% if histories %}
+        <div class="history-grid history-case-grid">
+            {% for item in histories %}
+            <article class="history-card history-case-card">
+                <div class="history-head">
+                    <span class="source-tag">{{ item.risk_level or '未知风险' }}</span>
+                    <span class="meta-inline">{{ item.last_viewed_at or item.created_at }}</span>
+                </div>
+                <h3>{{ item.case_title }}</h3>
+                <div class="chip-row">
+                    {% if item.case_type %}
+                    <span class="chip">{{ item.case_type }}</span>
+                    {% endif %}
+                    {% if item.country %}
+                    <span class="chip">{{ item.country }}</span>
+                    {% endif %}
+                    {% if item.court_level %}
+                    <span class="chip">{{ item.court_level }}</span>
+                    {% endif %}
+                    <span class="chip">访问 {{ item.view_count }}</span>
+                </div>
+                <p class="result-copy">
+                    {{ item.case_summary or item.query_text[:180] }}
+                    {% if item.case_summary and item.case_summary|length > 180 %}...{% endif %}
+                </p>
+                {% if item.risk_points %}
+                <div class="chip-row">
+                    {% for risk in item.risk_points[:3] %}
+                    <span class="chip chip-ghost">{{ risk.level }} / {{ risk.name }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                <div class="definition-list history-definition-list">
+                    <div>
+                        <dt>预测结论</dt>
+                        <dd>{{ item.prediction.conclusion or '当前还没有稳定的预测结论' }}</dd>
+                    </div>
+                    <div>
+                        <dt>置信度</dt>
+                        <dd>{{ (item.prediction.confidence * 100)|round(0)|int }}%</dd>
+                    </div>
+                </div>
+                <div class="card-actions">
+                    <a class="text-link" href="/histories/{{ item.id }}">查看详情</a>
+                    <a class="text-link" href="/predict?draft={{ item.query_text|urlencode }}&module={{ item.module_code or 'canada' }}">
+                        {% if item.has_prediction %}带入预测页{% else %}继续预测{% endif %}
+                    </a>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <h2>当前没有符合条件的历史记录</h2>
+            <p>提交一次案情分析后，这里会保存去重后的案件历史，并可切换到图谱视图查看它们之间的关联。</p>
+        </div>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

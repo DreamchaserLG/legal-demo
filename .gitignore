@@ -30,6 +30,7 @@ htmlcov/
 tmp-*.pdf
 *.tmp
 *.bak
+data_archive/
 
 # Local browser drivers
 drivers/

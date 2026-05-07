@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} | 管理员 / 案例{% endblock %}
+
+{% block content %}
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <div>
+                <p class="eyebrow">Admin Cases</p>
+                <h2>数据库中的全部案例</h2>
+            </div>
+        </div>
+        <form class="tool-panel compact admin-filter-panel" method="get" action="/admin/cases">
+            <div class="admin-filter-grid">
+                <div>
+                    <label for="country">国家</label>
+                    <input id="country" name="country" type="text" value="{{ filters.country or '' }}" />
+                </div>
+                <div>
+                    <label for="case_type">案件类型</label>
+                    <input id="case_type" name="case_type" type="text" value="{{ filters.case_type or '' }}" />
+                </div>
+                <div>
+                    <label for="court_level">法院级别</label>
+                    <input id="court_level" name="court_level" type="text" value="{{ filters.court_level or '' }}" />
+                </div>
+                <div>
+                    <label for="rule_keyword">法律法规</label>
+                    <input id="rule_keyword" name="rule_keyword" type="text" value="{{ filters.rule_keyword or '' }}" />
+                </div>
+                <div>
+                    <label for="keyword">关键词</label>
+                    <input id="keyword" name="keyword" type="text" value="{{ filters.keyword or '' }}" />
+                </div>
+                <div>
+                    <label for="source_site">来源网站</label>
+                    <input id="source_site" name="source_site" type="text" value="{{ filters.source_site or '' }}" />
+                </div>
+            </div>
+            <div class="action-row">
+                <button type="submit">筛选案例</button>
+            </div>
+        </form>
+
+        <div class="stack-grid">
+            {% for item in cases %}
+            <article class="result-card case">
+                <div class="result-head">
+                    <span class="source-tag">{{ item.court_level or "Case" }}</span>
+                    <span class="meta-inline">关联法规 {{ item.related_rule_count or 0 }}</span>
+                </div>
+                <h3>{{ item.title }}</h3>
+                <div class="chip-row">
+                    <span class="chip">{{ item.country }}</span>
+                    {% if item.case_type %}
+                    <span class="chip">{{ item.case_type }}</span>
+                    {% endif %}
+                    {% if item.source_site %}
+                    <span class="chip">{{ item.source_site }}</span>
+                    {% endif %}
+                </div>
+                {% if item.summary %}
+                <p class="result-copy">{{ item.summary }}</p>
+                {% endif %}
+                <div class="card-actions">
+                    {% if item.source_url %}
+                    <a class="text-link" href="{{ item.source_url }}" target="_blank">来源链接</a>
+                    {% endif %}
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}

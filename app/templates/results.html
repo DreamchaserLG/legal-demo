@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 
 {% block title %}{{ app_name }} | 检索结果{% endblock %}
 
@@ -6,11 +6,11 @@
 <section class="hero hero-results">
     <div class="shell hero-grid detail-grid">
         <div class="hero-copy">
-            <p class="eyebrow">Search Results</p>
+            <p class="eyebrow">{{ module_profile.label }}</p>
             <h1>{{ keywords_input or "输入关键词开始检索" }}</h1>
             <p class="hero-text">
                 {% if keywords %}
-                已拆分关键词：{{ keywords | join(" / ") }}
+                已拆解关键词：{{ keywords | join(" / ") }}
                 {% else %}
                 当前还没有有效关键词。
                 {% endif %}
@@ -18,8 +18,14 @@
         </div>
 
         <form class="tool-panel compact" method="get" action="/results" data-loading-mode="search">
+            <label for="module">研究模块</label>
+            <select id="module" name="module">
+                {% for option in module_options %}
+                <option value="{{ option.value }}" {% if module_code == option.value %}selected{% endif %}>{{ option.picker_label or option.label }}</option>
+                {% endfor %}
+            </select>
             <label for="keywords">关键词</label>
-            <input type="text" id="keywords" name="keywords" value="{{ keywords_input }}" placeholder="inheritance, contract, sanctions" />
+            <input type="text" id="keywords" name="keywords" value="{{ keywords_input }}" placeholder="inheritance, OFAC delisting, trustee liability" />
             <div class="form-grid">
                 <div>
                     <label for="limit">结果数</label>
@@ -28,12 +34,12 @@
                 <div>
                     <label for="source">数据源</label>
                     <select id="source" name="source">
-                        <option value="all" {% if source == "all" %}selected{% endif %}>全部</option>
-                        <option value="canlii" {% if source == "canlii" %}selected{% endif %}>CanLII</option>
-                        <option value="ofac" {% if source == "ofac" %}selected{% endif %}>OFAC</option>
+                        {% for option in source_options %}
+                        <option value="{{ option.value }}" {% if source == option.value %}selected{% endif %}>{{ option.picker_label or option.label }}</option>
+                        {% endfor %}
                     </select>
                 </div>
-                <div>
+                <div class="field-span-full">
                     <label for="sort">排序</label>
                     <select id="sort" name="sort">
                         <option value="relevance" {% if sort == "relevance" %}selected{% endif %}>相关度优先</option>
@@ -61,22 +67,23 @@
                 <small>当前页条目</small>
             </article>
             <article class="stat-box">
-                <span>{{ source_counts.canlii }}</span>
-                <small>CanLII</small>
+                <span>{{ source_counts.legislation }}</span>
+                <small>法规</small>
             </article>
             <article class="stat-box">
-                <span>{{ source_counts.ofac }}</span>
-                <small>OFAC</small>
+                <span>{{ source_counts.canlii + source_counts.ofac }}</span>
+                <small>案例 / 记录</small>
             </article>
         </div>
         <div class="pager-row">
             {% if has_previous %}
-            <a class="pager-link" href="/results?keywords={{ keywords_input|urlencode }}&limit={{ limit }}&offset={{ previous_offset }}&source={{ source }}&sort={{ sort }}">上一页</a>
+            <a class="pager-link" href="/results?keywords={{ keywords_input|urlencode }}&limit={{ limit }}&offset={{ previous_offset }}&source={{ source }}&sort={{ sort }}&module={{ module_code }}">上一页</a>
             {% endif %}
             {% if has_next %}
-            <a class="pager-link" href="/results?keywords={{ keywords_input|urlencode }}&limit={{ limit }}&offset={{ next_offset }}&source={{ source }}&sort={{ sort }}">下一页</a>
+            <a class="pager-link" href="/results?keywords={{ keywords_input|urlencode }}&limit={{ limit }}&offset={{ next_offset }}&source={{ source }}&sort={{ sort }}&module={{ module_code }}">下一页</a>
             {% endif %}
         </div>
+        <p class="notice-text">{{ module_profile.subtitle }}</p>
         {% if remote_fetch and remote_fetch.status != "local_only" and remote_fetch.message %}
         <p class="notice-text">{{ remote_fetch.message }}</p>
         {% endif %}
@@ -84,15 +91,17 @@
 </section>
 
 {% include "partials/task_banner.html" %}
-
+{% include "partials/module_sections.html" %}
+{% if module_code != "canada" %}
 {% include "partials/search_sections.html" %}
+{% endif %}
 
 {% if total == 0 %}
 <section class="band">
     <div class="shell empty-state">
         <p class="eyebrow">No Match</p>
-        <h2>当前本地库里没有命中。</h2>
-        <p>可以尝试换成更贴近争议焦点的词组，或者先扩充 CanLII 数据覆盖范围。</p>
+        <h2>未找到与当前查询匹配的案例及法律法规</h2>
+        <p>请尝试补充更具体的事实、争议点、法规名称或法院层级信息。</p>
     </div>
 </section>
 {% endif %}

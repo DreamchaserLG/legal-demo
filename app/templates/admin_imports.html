@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} | 管理员 / 导入{% endblock %}
+
+{% block content %}
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <div>
+                <p class="eyebrow">Admin Imports</p>
+                <h2>数据导入与爬取</h2>
+            </div>
+        </div>
+
+        <div class="admin-import-grid">
+            <form class="tool-panel compact" method="post" action="/admin/import/url">
+                <p class="panel-kicker">通过 URL 导入</p>
+                <label for="source_url">网页地址</label>
+                <input id="source_url" name="source_url" type="url" required />
+                <label for="country">国家</label>
+                <input id="country" name="country" type="text" value="Canada" required />
+                <label for="data_type">数据类型</label>
+                <select id="data_type" name="data_type">
+                    <option value="case">案例</option>
+                    <option value="rule">法律法规</option>
+                </select>
+                <label for="legal_type">法律类型</label>
+                <input id="legal_type" name="legal_type" type="text" />
+                <label for="case_type">案件类型</label>
+                <input id="case_type" name="case_type" type="text" />
+                <label for="court_level">法院级别</label>
+                <input id="court_level" name="court_level" type="text" />
+                <label class="checkbox-line">
+                    <input type="checkbox" name="auto_link" value="1" />
+                    自动建立案例与法规关联
+                </label>
+                <div class="action-row">
+                    <button type="submit">开始导入</button>
+                </div>
+            </form>
+
+            <form class="tool-panel compact" method="post" action="/admin/import/manual">
+                <p class="panel-kicker">手动导入</p>
+                <label for="manual_data_type">数据类型</label>
+                <select id="manual_data_type" name="data_type">
+                    <option value="case">案例</option>
+                    <option value="rule">法律法规</option>
+                </select>
+                <label for="manual_country">国家</label>
+                <input id="manual_country" name="country" type="text" value="Canada" required />
+                <label for="title">标题</label>
+                <input id="title" name="title" type="text" required />
+                <label for="court_name">法院</label>
+                <input id="court_name" name="court_name" type="text" />
+                <label for="court_level_manual">法院级别</label>
+                <input id="court_level_manual" name="court_level" type="text" />
+                <label for="case_type_manual">案件类型</label>
+                <input id="case_type_manual" name="case_type" type="text" />
+                <label for="legal_type_manual">法律类型</label>
+                <input id="legal_type_manual" name="legal_type" type="text" />
+                <label for="summary">摘要</label>
+                <textarea id="summary" name="summary" rows="3"></textarea>
+                <label for="facts">详细内容 / 案情</label>
+                <textarea id="facts" name="facts" rows="5"></textarea>
+                <label for="judgment_result">处理结果</label>
+                <textarea id="judgment_result" name="judgment_result" rows="3"></textarea>
+                <label for="article_no">条文编号</label>
+                <input id="article_no" name="article_no" type="text" />
+                <label for="article_text">条文内容</label>
+                <textarea id="article_text" name="article_text" rows="4"></textarea>
+                <label for="article_summary">条文摘要</label>
+                <textarea id="article_summary" name="article_summary" rows="3"></textarea>
+                <label for="manual_source_url">来源链接</label>
+                <input id="manual_source_url" name="source_url" type="url" />
+                <label class="checkbox-line">
+                    <input type="checkbox" name="auto_link" value="1" />
+                    自动建立案例与法规关联
+                </label>
+                <div class="action-row">
+                    <button type="submit">保存导入</button>
+                </div>
+            </form>
+
+            <form class="tool-panel compact" method="post" action="/admin/import/crawler">
+                <p class="panel-kicker">公开源同步</p>
+                <p class="memo-copy">使用当前项目已有的公开爬取逻辑同步加拿大法规与 CanLII 案例，并刷新通用案例法规关系表。</p>
+                <div class="action-row">
+                    <button type="submit">同步加拿大数据</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="band-head minor-head">
+            <div>
+                <p class="eyebrow">Import Tasks</p>
+                <h2>导入任务记录</h2>
+            </div>
+        </div>
+        <div class="table-card">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>类型</th>
+                        <th>国家</th>
+                        <th>来源</th>
+                        <th>状态</th>
+                        <th>成功</th>
+                        <th>失败</th>
+                        <th>创建人</th>
+                        <th>错误</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in import_tasks %}
+                    <tr>
+                        <td>{{ item.created_at }}</td>
+                        <td>{{ item.import_type }}</td>
+                        <td>{{ item.country }}</td>
+                        <td>{{ item.source_url or '-' }}</td>
+                        <td>{{ item.status }}</td>
+                        <td>{{ item.success_count }}</td>
+                        <td>{{ item.fail_count }}</td>
+                        <td>{{ item.created_by_username or '-' }}</td>
+                        <td>{{ item.error_message or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+{% endblock %}

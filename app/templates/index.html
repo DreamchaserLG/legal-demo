@@ -1,21 +1,20 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 
-{% block title %}{{ app_name }} | 检索台{% endblock %}
+{% block title %}{{ app_name }} | 首页{% endblock %}
 
 {% block content %}
 <section class="hero hero-home">
     <div class="shell hero-grid home-grid">
         <div class="hero-copy">
-            <p class="eyebrow">Legal Retrieval Demo</p>
-            <h1>先检索材料，再把案情送进分析和预测链路。</h1>
+            <p class="eyebrow">Legal Retrieval Workbench</p>
+            <h1>面向外国法律法规与案例关系检索的法律研究工作台</h1>
             <p class="hero-text">
-                这个 demo 现在聚焦三页流程：关键词检索、案例分析、判决预测。
-                PDF 导出作为预测结果的附属能力保留，不再单独占一个页面。
+                首页保留关键词检索，也支持直接输入案情进入统一分析页。分析阶段优先使用本地数据库中的案例、法律法规与关系数据，避免实时远程抓取带来的等待。
             </p>
             <div class="metric-row">
                 <article class="metric-tile">
-                    <span>{{ dashboard.total_items }}</span>
-                    <small>本地条目总数</small>
+                    <span>{{ dashboard.external_total_items }}</span>
+                    <small>本地资料条目</small>
                 </article>
                 <article class="metric-tile">
                     <span>{{ dashboard.counts.canlii }}</span>
@@ -23,21 +22,30 @@
                 </article>
                 <article class="metric-tile">
                     <span>{{ dashboard.counts.ofac }}</span>
-                    <small>OFAC 条目</small>
+                    <small>OFAC 资料</small>
+                </article>
+                <article class="metric-tile">
+                    <span>{{ dashboard.analyzed_case_count }}</span>
+                    <small>已分析案情</small>
+                </article>
+                <article class="metric-tile">
+                    <span>{{ dashboard.analysis_run_count }}</span>
+                    <small>分析运行次数</small>
                 </article>
             </div>
+            <p class="notice-text">当前登录用户：{{ current_user.real_name or current_user.username }}。系统会自动保存去重后的案件历史，后续可直接从历史记录继续查看。</p>
         </div>
 
         <form class="tool-panel" method="get" action="/results" data-loading-mode="search">
             <p class="panel-kicker">关键词检索</p>
+            <label for="search-module">研究模块</label>
+            <select id="search-module" name="module">
+                {% for option in module_options %}
+                <option value="{{ option.value }}">{{ option.picker_label or option.label }}</option>
+                {% endfor %}
+            </select>
             <label for="keywords">关键词</label>
-            <input
-                type="text"
-                id="keywords"
-                name="keywords"
-                placeholder="inheritance, contract, sanctions"
-                required
-            />
+            <input type="text" id="keywords" name="keywords" placeholder="例如：遗产争议、OFAC 除名、受托责任" required />
             <div class="form-grid">
                 <div>
                     <label for="search-limit">结果数</label>
@@ -46,12 +54,12 @@
                 <div>
                     <label for="search-source">数据源</label>
                     <select id="search-source" name="source">
-                        <option value="all">全部</option>
-                        <option value="canlii">CanLII</option>
-                        <option value="ofac">OFAC</option>
+                        {% for option in source_options %}
+                        <option value="{{ option.value }}">{{ option.picker_label or option.label }}</option>
+                        {% endfor %}
                     </select>
                 </div>
-                <div>
+                <div class="field-span-full">
                     <label for="search-sort">排序</label>
                     <select id="search-sort" name="sort">
                         <option value="relevance">相关度优先</option>
@@ -64,16 +72,16 @@
             </div>
         </form>
 
-        <form class="tool-panel" method="get" action="/analyze" data-loading-mode="analyze">
+        <form class="tool-panel" method="get" action="/analysis" data-loading-mode="analysis">
             <p class="panel-kicker">案情分析</p>
+            <label for="analysis-module">研究模块</label>
+            <select id="analysis-module" name="module">
+                {% for option in module_options %}
+                <option value="{{ option.value }}">{{ option.picker_label or option.label }}</option>
+                {% endfor %}
+            </select>
             <label for="text">案情描述</label>
-            <textarea
-                id="text"
-                name="text"
-                rows="6"
-                placeholder="例如：父母去世后，兄妹围绕遗嘱效力、房产分配和受托义务产生争议。"
-                required
-            ></textarea>
+            <textarea id="text" name="text" rows="6" placeholder="例如：一家公司因涉嫌帮助他人规避制裁而被调查；或家庭成员围绕遗产、信托义务和财产分配发生争议。" required></textarea>
             <div class="form-grid">
                 <div>
                     <label for="analysis-limit">结果数</label>
@@ -82,12 +90,12 @@
                 <div>
                     <label for="analysis-source">数据源</label>
                     <select id="analysis-source" name="source">
-                        <option value="all">全部</option>
-                        <option value="canlii">CanLII</option>
-                        <option value="ofac">OFAC</option>
+                        {% for option in source_options %}
+                        <option value="{{ option.value }}">{{ option.picker_label or option.label }}</option>
+                        {% endfor %}
                     </select>
                 </div>
-                <div>
+                <div class="field-span-full">
                     <label for="analysis-sort">排序</label>
                     <select id="analysis-sort" name="sort">
                         <option value="relevance">相关度优先</option>
@@ -95,9 +103,8 @@
                     </select>
                 </div>
             </div>
-            <div class="action-row dual">
-                <button type="submit">先做案情拆解</button>
-                <button type="submit" formaction="/predict" class="secondary">直接生成预测</button>
+            <div class="action-row">
+                <button type="submit">进入案情分析</button>
             </div>
         </form>
     </div>
@@ -106,35 +113,27 @@
 <section class="band">
     <div class="shell">
         <div class="band-head">
-            <p class="eyebrow">Workflow</p>
-            <h2>从一句案情到一页结论的处理顺序</h2>
+            <div>
+                <p class="eyebrow">Modules</p>
+                <h2>两个模块共用一套页面逻辑，但数据边界不同</h2>
+            </div>
         </div>
-        <div class="tile-grid">
-            <article class="tile">
-                <p class="tile-kicker">Step 1</p>
-                <h3>拆分输入</h3>
-                <p class="tile-copy">先把输入拆成事实、争议焦点、请求事项和关键词，避免只靠整句模糊匹配。</p>
+        <div class="module-card-grid">
+            <article class="module-card">
+                <p class="panel-kicker">加拿大</p>
+                <h3>法规优先，案例按明确关系入库与调用</h3>
+                <p class="tile-copy">
+                    加拿大模块优先依赖本地法律法规、案例和关联表进行匹配。命中的法规可进入详情页，详情页再按国家/联邦与省级/地方双栏展示关联案例。
+                </p>
             </article>
-            <article class="tile">
-                <p class="tile-kicker">Step 2</p>
-                <h3>关联检索</h3>
-                <p class="tile-copy">优先从本地库召回最相关的 CanLII 和 OFAC 记录，按来源和相关度分组展示。</p>
-            </article>
-            <article class="tile">
-                <p class="tile-kicker">Step 3</p>
-                <h3>生成预测</h3>
-                <p class="tile-copy">在有支持材料的前提下输出预测结论、关键理由、风险点和支持案例摘要。</p>
+            <article class="module-card">
+                <p class="panel-kicker">美国 OFAC</p>
+                <h3>聚焦 OFAC 规则、记录与合规处理路径</h3>
+                <p class="tile-copy">
+                    美国模块当前只处理 OFAC 相关规则与处理路径，不混入普通美国判例。分析与预测阶段同样优先使用本地数据。
+                </p>
             </article>
         </div>
-    </div>
-</section>
-
-<section class="band band-alt">
-    <div class="shell quick-links">
-        <a href="/results?keywords=contract&limit=10&source=canlii&sort=relevance">合同争议检索</a>
-        <a href="/results?keywords=sanction&limit=10&source=all&sort=relevance">制裁名单检索</a>
-        <a href="/analyze?text=The dispute concerns inheritance and property division.&limit=8&source=all&sort=relevance">继承与财产分配</a>
-        <a href="/predict?text=A shareholder alleges oppression after being excluded from management decisions.&limit=8&source=canlii&sort=relevance">股东压迫救济预测</a>
     </div>
 </section>
 {% endblock %}

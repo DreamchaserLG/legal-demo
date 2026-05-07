@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} | 注册{% endblock %}
+
+{% block content %}
+<section class="band auth-shell">
+    <div class="shell auth-grid">
+        <div class="hero-copy">
+            <p class="eyebrow">Create Account</p>
+            <h1>注册账号并启用历史记录保存</h1>
+            <p class="hero-text">新用户默认角色为普通用户，密码会加密存储。注册成功后即可登录进入系统。</p>
+        </div>
+        <form class="tool-panel" method="post" action="/auth/register">
+            <input type="hidden" name="next" value="{{ next_url or '/' }}" />
+            <label for="username">用户名</label>
+            <input id="username" name="username" type="text" value="{{ form_values.username or '' }}" minlength="2" autocomplete="username" required />
+            <label for="email">邮箱</label>
+            <input id="email" name="email" type="email" value="{{ form_values.email or '' }}" />
+            <label for="password">密码</label>
+            <input id="password" name="password" type="password" minlength="6" autocomplete="new-password" required />
+            <label for="confirm_password">确认密码</label>
+            <input id="confirm_password" name="confirm_password" type="password" minlength="6" autocomplete="new-password" required />
+            {% if auth_error %}
+            <p class="notice-text">{{ auth_error }}</p>
+            {% endif %}
+            <div class="action-row">
+                <button type="submit">注册</button>
+                <a class="pager-link secondary" href="/login{% if next_url %}?next={{ next_url|urlencode }}{% endif %}">返回登录</a>
+            </div>
+        </form>
+    </div>
+</section>
+{% endblock %}

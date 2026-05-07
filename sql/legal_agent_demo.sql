@@ -88,6 +88,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_ingestion_tasks_active_fingerprint
 CREATE TABLE IF NOT EXISTS agent_runs (
     id BIGSERIAL PRIMARY KEY,
     input_text TEXT NOT NULL,
+    module_code VARCHAR(30) NOT NULL DEFAULT 'canada',
     source_filter VARCHAR(50) NOT NULL DEFAULT 'all',
     sort_mode VARCHAR(30) NOT NULL DEFAULT 'relevance',
     extracted_keywords TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
@@ -98,10 +99,12 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at ON agent_runs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_keywords ON agent_runs USING GIN(extracted_keywords);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_module_created_at ON agent_runs(module_code, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS agent_predictions (
     id BIGSERIAL PRIMARY KEY,
     agent_run_id BIGINT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+    module_code VARCHAR(30) NOT NULL DEFAULT 'canada',
     model_provider VARCHAR(50) NOT NULL DEFAULT 'openai',
     model_name VARCHAR(100) NOT NULL,
     status VARCHAR(30) NOT NULL DEFAULT 'preview',
@@ -117,3 +120,17 @@ CREATE TABLE IF NOT EXISTS agent_predictions (
 
 CREATE INDEX IF NOT EXISTS idx_agent_predictions_run_id ON agent_predictions(agent_run_id);
 CREATE INDEX IF NOT EXISTS idx_agent_predictions_status ON agent_predictions(status);
+CREATE INDEX IF NOT EXISTS idx_agent_predictions_module_created_at ON agent_predictions(module_code, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_chat_logs (
+    id BIGSERIAL PRIMARY KEY,
+    module_code VARCHAR(30) NOT NULL DEFAULT 'canada',
+    input_text TEXT NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    raw_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_chat_logs_module_created_at
+    ON agent_chat_logs(module_code, created_at DESC);

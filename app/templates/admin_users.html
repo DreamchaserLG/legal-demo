@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} | 管理员 / 用户{% endblock %}
+
+{% block content %}
+<section class="band">
+    <div class="shell">
+        <div class="band-head">
+            <div>
+                <p class="eyebrow">Admin Users</p>
+                <h2>用户管理</h2>
+            </div>
+        </div>
+        <div class="table-card">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>用户名</th>
+                        <th>邮箱</th>
+                        <th>角色</th>
+                        <th>状态</th>
+                        <th>注册时间</th>
+                        <th>最近登录</th>
+                        <th>历史次数</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in admin_users %}
+                    <tr>
+                        <td>{{ user.username }}</td>
+                        <td>{{ user.email }}</td>
+                        <td>{{ user.role }}</td>
+                        <td>{{ user.status }}</td>
+                        <td>{{ user.created_at }}</td>
+                        <td>{{ user.last_login_at or '-' }}</td>
+                        <td>{{ user.history_count or 0 }}</td>
+                        <td class="table-actions">
+                            <a class="text-link" href="/admin/users?selected_user_id={{ user.id }}">查看历史</a>
+                            <button
+                                type="button"
+                                class="text-link admin-status-toggle"
+                                data-user-id="{{ user.id }}"
+                                data-status="{{ 'active' if user.status != 'active' else 'disabled' }}"
+                            >
+                                {{ '启用' if user.status != 'active' else '禁用' }}
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if selected_histories %}
+        <section class="band-head minor-head">
+            <div>
+                <p class="eyebrow">User Histories</p>
+                <h2>选中用户的历史记录</h2>
+            </div>
+        </section>
+        <div class="history-grid">
+            {% for item in selected_histories %}
+            <article class="history-card">
+                <div class="history-head">
+                    <span class="source-tag">{{ item.query_type }}</span>
+                    <span class="meta-inline">{{ item.created_at }}</span>
+                </div>
+                <p class="memo-copy">{{ item.query_text }}</p>
+                <div class="chip-row">
+                    {% if item.country %}
+                    <span class="chip">{{ item.country }}</span>
+                    {% endif %}
+                    {% if item.court_level %}
+                    <span class="chip">{{ item.court_level }}</span>
+                    {% endif %}
+                    {% if item.legal_type %}
+                    <span class="chip">{{ item.legal_type }}</span>
+                    {% endif %}
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</section>
+
+<script>
+document.querySelectorAll('.admin-status-toggle').forEach((button) => {
+    button.addEventListener('click', async () => {
+        const response = await fetch(`/api/admin/users/${button.dataset.userId}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: button.dataset.status }),
+        });
+        if (response.ok) {
+            window.location.reload();
+        }
+    });
+});
+</script>
+{% endblock %}

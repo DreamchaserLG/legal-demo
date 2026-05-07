@@ -1,0 +1,183 @@
+{% set chat_packet = module_packet or {} %}
+<section class="band band-alt">
+    <div class="shell">
+        <div class="band-head">
+            <div>
+                <p class="eyebrow">{{ module_profile.agent_title or "关联深度分析" }}</p>
+                <h2>围绕当前结果继续提问</h2>
+            </div>
+        </div>
+        <article class="agent-chat-panel" data-module="{{ module_code }}" data-text="{{ text_input|e }}" data-limit="{{ limit }}" data-offset="{{ offset }}" data-source="{{ source }}" data-sort="{{ sort }}">
+            <div class="agent-chat-copy">
+                <p class="memo-copy">
+                    这里会围绕当前已经命中的法律法规、案例或 OFAC 材料继续回答；如果同样的问题之前已经问过，系统会优先复用已有答案。
+                </p>
+                {% if chat_packet.suggested_questions %}
+                <div class="chip-row">
+                    {% for prompt in chat_packet.suggested_questions %}
+                    <button type="button" class="chip chat-prompt">{{ prompt }}</button>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+
+            <form class="agent-chat-form">
+                <label for="agent-question-{{ page_id }}">问题</label>
+                <textarea id="agent-question-{{ page_id }}" class="agent-chat-input" rows="4" placeholder="{{ chat_packet.agent_placeholder or '例如：当前最关键的法规是哪一条？哪些案例最值得优先核对？' }}"></textarea>
+                <div class="action-row">
+                    <button type="submit">开始关联分析</button>
+                </div>
+            </form>
+
+            <div class="agent-chat-response" hidden>
+                <div class="result-head">
+                    <span class="source-tag">关联分析</span>
+                    <span class="meta-inline agent-chat-model"></span>
+                </div>
+
+                <div class="agent-chat-columns">
+                    <div>
+                        <p class="panel-kicker">回答</p>
+                        <p class="memo-copy agent-chat-answer-zh"></p>
+                        <p class="panel-kicker">支持要点</p>
+                        <ul class="memo-list agent-chat-support-zh"></ul>
+                        <p class="panel-kicker">注意事项</p>
+                        <ul class="memo-list memo-risk-list agent-chat-cautions-zh"></ul>
+                    </div>
+                </div>
+
+                <div class="agent-chat-columns agent-chat-reference-grid">
+                    <div>
+                        <p class="panel-kicker">关联法律法规</p>
+                        <div class="chip-row agent-chat-law-links"></div>
+                    </div>
+                    <div>
+                        <p class="panel-kicker">参考资料</p>
+                        <div class="chip-row agent-chat-case-links"></div>
+                    </div>
+                </div>
+
+                <div class="agent-chat-followups">
+                    <p class="panel-kicker">建议继续追问</p>
+                    <div class="chip-row agent-chat-followup-chips"></div>
+                </div>
+            </div>
+            <p class="notice-text agent-chat-status" hidden></p>
+        </article>
+    </div>
+</section>
+
+<script>
+(() => {
+    const panel = document.currentScript?.previousElementSibling?.querySelector('.agent-chat-panel');
+    if (!panel) return;
+
+    const form = panel.querySelector('.agent-chat-form');
+    const input = panel.querySelector('.agent-chat-input');
+    const responseBox = panel.querySelector('.agent-chat-response');
+    const statusBox = panel.querySelector('.agent-chat-status');
+    const answerZhEl = panel.querySelector('.agent-chat-answer-zh');
+    const supportZhEl = panel.querySelector('.agent-chat-support-zh');
+    const cautionZhEl = panel.querySelector('.agent-chat-cautions-zh');
+    const followupsEl = panel.querySelector('.agent-chat-followup-chips');
+    const lawLinksEl = panel.querySelector('.agent-chat-law-links');
+    const caseLinksEl = panel.querySelector('.agent-chat-case-links');
+    const modelEl = panel.querySelector('.agent-chat-model');
+
+    function renderList(target, values) {
+        target.innerHTML = (values || []).map((item) => `<li>${item}</li>`).join('');
+    }
+
+    function renderLinks(target, values, emptyLabel) {
+        const items = values || [];
+        if (!items.length) {
+            target.innerHTML = `<span class="chip chip-ghost">${emptyLabel}</span>`;
+            return;
+        }
+        target.innerHTML = items.map((item) => {
+            const label = item.label ? `${item.title} / ${item.label}` : item.title;
+            if (item.url) {
+                return `<a class="chip" href="${item.url}" target="_blank">${label}</a>`;
+            }
+            return `<span class="chip chip-ghost">${label}</span>`;
+        }).join('');
+    }
+
+    function renderFollowups(zhValues) {
+        const unique = [...new Set(
+            (zhValues || [])
+                .map((item) => String(item || '').trim())
+                .filter((item) => item && /[\u4e00-\u9fff]/.test(item) && !/�/.test(item))
+        )];
+        followupsEl.innerHTML = unique.map((item) => `<button type="button" class="chip chat-prompt">${item}</button>`).join('');
+    }
+
+    function bindPromptButtons() {
+        panel.querySelectorAll('.chat-prompt').forEach((button) => {
+            if (!/[\u4e00-\u9fff]/.test(button.textContent || '')) {
+                button.remove();
+                return;
+            }
+            button.addEventListener('click', () => {
+                input.value = button.textContent.trim();
+                input.focus();
+            });
+        });
+    }
+
+    bindPromptButtons();
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const question = input.value.trim();
+        if (!question) {
+            statusBox.hidden = false;
+            statusBox.textContent = '请输入要继续追问的问题。';
+            return;
+        }
+
+        statusBox.hidden = false;
+        statusBox.textContent = '正在基于当前结果生成关联分析，请稍候。';
+        responseBox.hidden = true;
+
+        try {
+            const payload = {
+                module: panel.dataset.module,
+                text: panel.dataset.text,
+                question,
+                limit: Number(panel.dataset.limit || 8),
+                offset: Number(panel.dataset.offset || 0),
+                source: panel.dataset.source || 'all',
+                sort: panel.dataset.sort || 'relevance',
+                refresh: false,
+            };
+
+            const response = await fetch('/api/agent-chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || '关联分析失败。');
+            }
+
+            const answer = data.answer || {};
+            const references = answer.references || {};
+            answerZhEl.textContent = answer.answer_zh || answer.answer_en || '';
+            renderList(supportZhEl, answer.support_points_zh || []);
+            renderList(cautionZhEl, answer.caution_points_zh || []);
+            renderFollowups(answer.suggested_followups_zh || []);
+            renderLinks(lawLinksEl, references.laws || [], '当前没有附带法规链接');
+            renderLinks(caseLinksEl, references.cases || [], '当前没有附带参考资料');
+            bindPromptButtons();
+            modelEl.textContent = answer.model_name || answer.model_status || '';
+            responseBox.hidden = false;
+            statusBox.hidden = true;
+        } catch (error) {
+            statusBox.hidden = false;
+            statusBox.textContent = error.message || '关联分析失败。';
+        }
+    });
+})();
+</script>

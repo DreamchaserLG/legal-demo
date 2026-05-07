@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} | 法规详情{% endblock %}
+
+{% block content %}
+<section class="hero hero-results">
+    <div class="shell hero-grid detail-grid">
+        <div class="hero-copy">
+            <p class="eyebrow">{{ module_profile.label }}</p>
+            <h1>{{ law_detail.law.title }}</h1>
+            {% if law_detail.law.article_no or law_detail.law.citation %}
+            <p class="hero-text">{{ law_detail.law.article_no or law_detail.law.citation }}</p>
+            {% endif %}
+            <p class="muted">当前页面展示该法律法规下全部已建立关系的案例，并按国家/联邦与省级/地方分栏。</p>
+        </div>
+
+        <div class="tool-panel compact">
+            <p class="panel-kicker">法规概览</p>
+            <div class="definition-list">
+                <div>
+                    <dt>国家</dt>
+                    <dd>{{ law_detail.law.country or law_detail.law.jurisdiction or "加拿大" }}</dd>
+                </div>
+                <div>
+                    <dt>类型</dt>
+                    <dd>{{ law_detail.law.legal_type or law_detail.law.kind or "法规" }}</dd>
+                </div>
+                <div>
+                    <dt>总案例数</dt>
+                    <dd>{{ law_detail.total_cases }}</dd>
+                </div>
+                <div>
+                    <dt>国家 / 联邦</dt>
+                    <dd>{{ law_detail.national_case_count }}</dd>
+                </div>
+                <div>
+                    <dt>省级 / 地方</dt>
+                    <dd>{{ law_detail.local_case_count }}</dd>
+                </div>
+            </div>
+            {% if law_detail.law.article_summary %}
+            <p class="result-copy">{{ law_detail.law.article_summary }}</p>
+            {% endif %}
+            {% if law_detail.law.article_text %}
+            <details>
+                <summary>查看条文内容</summary>
+                <div class="detail-box">{{ law_detail.law.article_text }}</div>
+            </details>
+            {% endif %}
+            <div class="action-row">
+                {% if law_detail.law.source_url %}
+                <a class="pager-link" href="{{ law_detail.law.source_url }}" target="_blank">查看法规原文</a>
+                {% endif %}
+                <a class="pager-link secondary" href="/home">返回首页</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="band band-alt">
+    <div class="shell">
+        <div class="band-head">
+            <div>
+                <p class="eyebrow">关联案例</p>
+                <h2>该法规下的全部已关联案例</h2>
+            </div>
+        </div>
+        <div class="law-case-columns">
+            {% for column in law_detail.case_columns %}
+            <section class="law-case-column">
+                <div class="law-column-head">
+                    <p class="panel-kicker">{{ column.label }}</p>
+                    {% if column.description %}
+                    <p class="muted">{{ column.description }}</p>
+                    {% endif %}
+                </div>
+
+                {% if column["items"] %}
+                <div class="law-related">
+                    {% for case in column["items"] %}
+                    <article class="law-related-item">
+                        <h4>{{ case.title }}</h4>
+                        <div class="chip-row">
+                            {% if case.court_level %}
+                            <span class="chip">{{ case.court_level }}</span>
+                            {% endif %}
+                            {% if case.case_type %}
+                            <span class="chip">{{ case.case_type }}</span>
+                            {% endif %}
+                            {% if case.judgment_date %}
+                            <span class="chip">{{ case.judgment_date }}</span>
+                            {% endif %}
+                        </div>
+                        {% if case.summary %}
+                        <p class="result-copy">{{ case.summary }}</p>
+                        {% endif %}
+                        {% if case.judgment_result %}
+                        <p class="muted">处理结果：{{ case.judgment_result }}</p>
+                        {% endif %}
+                        {% if case.match_reason %}
+                        <p class="muted">关联理由：{{ case.match_reason }}</p>
+                        {% endif %}
+                        <div class="card-actions">
+                            {% if case.source_url %}
+                            <a class="text-link" href="{{ case.source_url }}" target="_blank">查看案例</a>
+                            {% endif %}
+                        </div>
+                    </article>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="law-related law-related-empty">
+                    <article class="law-related-item">
+                        <p class="muted">{{ column.empty_copy }}</p>
+                    </article>
+                </div>
+                {% endif %}
+            </section>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}

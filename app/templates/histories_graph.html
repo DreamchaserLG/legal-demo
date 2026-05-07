@@ -1,0 +1,511 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} | 历史图谱{% endblock %}
+
+{% block content %}
+<section class="band history-galaxy-page">
+    <div class="shell">
+        <div class="band-head history-galaxy-head">
+            <div>
+                <p class="eyebrow">历史图谱</p>
+                <h2>我的历史案情星图</h2>
+                <p class="notice-text">每个节点代表一条去重后的历史案情记录。点击节点会进入对应历史详情页，不会新增历史记录。</p>
+            </div>
+            <div class="history-view-switch">
+                <a class="pager-link secondary" href="/histories">列表视图</a>
+                <a class="pager-link" href="/histories/graph">图谱视图</a>
+            </div>
+        </div>
+
+        <form class="tool-panel compact history-graph-filter" method="get" action="/histories/graph">
+            <div class="admin-filter-grid history-filter-grid">
+                <div>
+                    <label for="case_type">案件类型</label>
+                    <input id="case_type" name="case_type" type="text" value="{{ graph_filters.case_type or '' }}" placeholder="合同 / 劳动 / 侵权" />
+                </div>
+                <div>
+                    <label for="country">国家</label>
+                    <input id="country" name="country" type="text" value="{{ graph_filters.country or '' }}" placeholder="加拿大 / 美国" />
+                </div>
+                <div>
+                    <label for="court_level">法院级别</label>
+                    <input id="court_level" name="court_level" type="text" value="{{ graph_filters.court_level or '' }}" placeholder="国家 / 联邦 / 地区 / 地方" />
+                </div>
+                <div>
+                    <label for="legal_rule">法律法规</label>
+                    <input id="legal_rule" name="legal_rule" type="text" value="{{ graph_filters.legal_rule or '' }}" placeholder="法规名称关键词" />
+                </div>
+                <div>
+                    <label for="start_date">开始日期</label>
+                    <input id="start_date" name="start_date" type="date" value="{{ graph_filters.start_date or '' }}" />
+                </div>
+                <div>
+                    <label for="end_date">结束日期</label>
+                    <input id="end_date" name="end_date" type="date" value="{{ graph_filters.end_date or '' }}" />
+                </div>
+            </div>
+            <div class="action-row">
+                <button type="submit">刷新图谱</button>
+                <a class="pager-link secondary" href="/analysis">新建案情分析</a>
+            </div>
+        </form>
+
+        <article class="history-galaxy-panel">
+            <div class="graph-toolbar">
+                <span class="meta-inline">拖拽节点</span>
+                <span class="meta-inline">滚轮缩放</span>
+                <span class="meta-inline">拖动画布平移</span>
+                <span class="meta-inline">悬停查看摘要</span>
+                <span class="meta-inline">节点 {{ (history_graph_data.nodes or [])|length }}</span>
+                <span class="meta-inline">关系 {{ (history_graph_data.links or [])|length }}</span>
+            </div>
+
+            {% if history_graph_data.nodes %}
+            <div class="history-galaxy-stage" id="history-galaxy-stage">
+                <div class="history-galaxy-nebula nebula-a" aria-hidden="true"></div>
+                <div class="history-galaxy-nebula nebula-b" aria-hidden="true"></div>
+                <div class="history-galaxy-stars history-galaxy-stars-back" id="history-galaxy-stars-back" aria-hidden="true"></div>
+                <div class="history-galaxy-stars history-galaxy-stars-front" id="history-galaxy-stars-front" aria-hidden="true"></div>
+                <svg id="history-galaxy-svg" class="history-galaxy-svg" viewBox="0 0 1480 900" aria-label="历史记录图谱"></svg>
+                <div class="history-graph-tooltip" id="history-graph-tooltip" hidden></div>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <h2>当前没有可展示的历史图谱节点</h2>
+                <p>你可以先完成至少一条案情分析或放宽筛选条件，再回来查看图谱关系。</p>
+            </div>
+            {% endif %}
+        </article>
+    </div>
+</section>
+
+{% if history_graph_data.nodes %}
+<script>
+(() => {
+    const graph = {{ history_graph_data|tojson }};
+    const stage = document.getElementById('history-galaxy-stage');
+    const svg = document.getElementById('history-galaxy-svg');
+    const tooltip = document.getElementById('history-graph-tooltip');
+    const starsBack = document.getElementById('history-galaxy-stars-back');
+    const starsFront = document.getElementById('history-galaxy-stars-front');
+    if (!stage || !svg || !tooltip || !starsBack || !starsFront) return;
+
+    const NS = 'http://www.w3.org/2000/svg';
+    const width = 1480;
+    const height = 900;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const rawNodes = graph.nodes || [];
+    const rawLinks = graph.links || [];
+    const clusterKeys = [...new Set(rawNodes.map((node) => node.caseType || node.nodeLabel || '其他案件'))];
+    const clusterCounts = new Map();
+    rawNodes.forEach((node) => {
+        const key = node.caseType || node.nodeLabel || '其他案件';
+        clusterCounts.set(key, (clusterCounts.get(key) || 0) + 1);
+    });
+    const clusterRadiusX = Math.min(470, 250 + clusterKeys.length * 34);
+    const clusterRadiusY = Math.min(290, 150 + clusterKeys.length * 18);
+    const clusterAnchors = new Map(
+        clusterKeys.map((key, index) => {
+            const angle = (index / Math.max(clusterKeys.length, 1)) * Math.PI * 2 - Math.PI / 2;
+            return [
+                key,
+                {
+                    x: centerX + Math.cos(angle) * clusterRadiusX,
+                    y: centerY + Math.sin(angle) * clusterRadiusY,
+                },
+            ];
+        }),
+    );
+    const clusterUsage = new Map();
+    const nodes = rawNodes.map((node, index) => {
+        const clusterKey = node.caseType || node.nodeLabel || '其他案件';
+        const clusterIndex = clusterUsage.get(clusterKey) || 0;
+        clusterUsage.set(clusterKey, clusterIndex + 1);
+        const anchor = clusterAnchors.get(clusterKey) || { x: centerX, y: centerY };
+        const perRing = Math.max(4, Math.min(7, clusterCounts.get(clusterKey) || 4));
+        const ring = Math.floor(clusterIndex / perRing);
+        const slot = clusterIndex % perRing;
+        const angle = ((slot / perRing) * Math.PI * 2) + (ring * 0.42) + (index * 0.03);
+        const radius = 34 + (ring * 40);
+        return {
+            ...node,
+            clusterKey,
+            anchorX: anchor.x,
+            anchorY: anchor.y,
+            x: anchor.x + Math.cos(angle) * radius,
+            y: anchor.y + Math.sin(angle) * radius,
+            vx: 0,
+            vy: 0,
+            fx: null,
+            fy: null,
+        };
+    });
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const links = rawLinks
+        .filter((link) => nodeById.has(link.source) && nodeById.has(link.target))
+        .map((link) => ({ ...link }));
+
+    const riskPalette = {
+        '高风险': { fill: '#ff667d', glow: 'rgba(255, 102, 125, 0.34)', edge: '#ffd3da' },
+        '中风险': { fill: '#ffae52', glow: 'rgba(255, 174, 82, 0.3)', edge: '#ffe6c3' },
+        '低风险': { fill: '#41c8a2', glow: 'rgba(65, 200, 162, 0.28)', edge: '#d6fff4' },
+        '未知风险': { fill: '#8ea7ca', glow: 'rgba(142, 167, 202, 0.24)', edge: '#eef4ff' },
+    };
+
+    const defs = document.createElementNS(NS, 'defs');
+    defs.innerHTML = `
+        <filter id="historyNodeGlow">
+            <feGaussianBlur stdDeviation="8" result="blur"></feGaussianBlur>
+            <feMerge>
+                <feMergeNode in="blur"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+        </filter>
+        <filter id="historyLinkGlow">
+            <feGaussianBlur stdDeviation="2.2" result="blur"></feGaussianBlur>
+            <feMerge>
+                <feMergeNode in="blur"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+        </filter>
+    `;
+    svg.appendChild(defs);
+
+    const viewport = document.createElementNS(NS, 'g');
+    const linkLayer = document.createElementNS(NS, 'g');
+    const nodeLayer = document.createElementNS(NS, 'g');
+    viewport.appendChild(linkLayer);
+    viewport.appendChild(nodeLayer);
+    svg.appendChild(viewport);
+
+    const state = {
+        scale: 0.94,
+        x: 0,
+        y: 0,
+        hoveredNodeId: '',
+        draggingNode: null,
+        panning: false,
+        pointerX: 0,
+        pointerY: 0,
+        originX: 0,
+        originY: 0,
+        animationFrames: 0,
+    };
+
+    function eventGraphNode(target) {
+        return target && typeof target.closest === 'function' ? target.closest('.history-graph-node') : null;
+    }
+
+    function seedStars(container, total, near) {
+        const fragments = [];
+        for (let index = 0; index < total; index += 1) {
+            const size = near ? (Math.random() * 3.4 + 1.2) : (Math.random() * 2.1 + 0.6);
+            const left = Math.random() * 100;
+            const top = Math.random() * 100;
+            const opacity = near ? (Math.random() * 0.65 + 0.24) : (Math.random() * 0.42 + 0.14);
+            const delay = Math.random() * 6;
+            const duration = near ? (4 + Math.random() * 6) : (7 + Math.random() * 8);
+            fragments.push(`<span style="left:${left}%;top:${top}%;width:${size}px;height:${size}px;opacity:${opacity};animation-delay:${delay}s;animation-duration:${duration}s;"></span>`);
+        }
+        container.innerHTML = fragments.join('');
+    }
+
+    function riskStyle(node) {
+        return riskPalette[node.riskLevel] || riskPalette['未知风险'];
+    }
+
+    function nodeRadius(node) {
+        return 28 + Math.min(Number(node.visitCount || 1) * 2, 14);
+    }
+
+    function linkWidth(similarity) {
+        if (similarity >= 0.8) return 4.8;
+        if (similarity >= 0.55) return 3.2;
+        return 1.8;
+    }
+
+    function linkOpacity(similarity) {
+        if (similarity >= 0.8) return 0.92;
+        if (similarity >= 0.55) return 0.58;
+        return 0.32;
+    }
+
+    function applyViewport() {
+        viewport.setAttribute('transform', `translate(${state.x} ${state.y}) scale(${state.scale})`);
+    }
+
+    function connectedNodeIds(nodeId) {
+        const related = new Set([nodeId]);
+        links.forEach((link) => {
+            if (link.source === nodeId) related.add(link.target);
+            if (link.target === nodeId) related.add(link.source);
+        });
+        return related;
+    }
+
+    function tooltipHtml(node) {
+        const laws = (node.laws || []).slice(0, 3).join('、') || '-';
+        const risks = (node.riskPoints || []).slice(0, 3).join('、') || '-';
+        return [
+            `<strong>${node.caseTitle || '未命名案件'}</strong>`,
+            `<span>创建时间：${node.createdAt || node.date || '-'}</span>`,
+            `<span>最近访问：${node.lastViewedAt || '-'}</span>`,
+            `<span>案件类型：${node.caseType || '-'}</span>`,
+            `<span>法院级别：${node.courtLevel || '-'}</span>`,
+            `<span>风险等级：${node.riskLevel || '未知风险'}</span>`,
+            `<span>预测结论：${node.prediction || '-'}</span>`,
+            `<span>涉及法律法规：${laws}</span>`,
+            `<span>主要风险点：${risks}</span>`,
+            `<span>访问次数：${node.visitCount || 1}</span>`,
+            `<em>点击查看案情分析详情</em>`,
+        ].join('');
+    }
+
+    function showTooltip(node, event) {
+        tooltip.hidden = false;
+        tooltip.innerHTML = tooltipHtml(node);
+        const stageRect = stage.getBoundingClientRect();
+        const left = Math.min(stageRect.width - 340, Math.max(16, event.clientX - stageRect.left + 18));
+        const top = Math.max(16, event.clientY - stageRect.top - 24);
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
+    }
+
+    function hideTooltip() {
+        tooltip.hidden = true;
+    }
+
+    function draw() {
+        linkLayer.innerHTML = '';
+        nodeLayer.innerHTML = '';
+
+        const highlighted = state.hoveredNodeId ? connectedNodeIds(state.hoveredNodeId) : new Set();
+
+        links.forEach((link) => {
+            const source = nodeById.get(link.source);
+            const target = nodeById.get(link.target);
+            if (!source || !target) return;
+
+            const emphasized = state.hoveredNodeId && (link.source === state.hoveredNodeId || link.target === state.hoveredNodeId);
+
+            const lineBack = document.createElementNS(NS, 'line');
+            lineBack.setAttribute('x1', source.x);
+            lineBack.setAttribute('y1', source.y);
+            lineBack.setAttribute('x2', target.x);
+            lineBack.setAttribute('y2', target.y);
+            lineBack.setAttribute('stroke-width', String(linkWidth(Number(link.similarity || 0)) + 2));
+            lineBack.setAttribute('stroke', emphasized ? 'rgba(120, 220, 255, 0.36)' : 'rgba(125, 166, 230, 0.1)');
+            lineBack.setAttribute('stroke-linecap', 'round');
+            lineBack.setAttribute('opacity', emphasized ? '0.95' : String(linkOpacity(Number(link.similarity || 0)) * 0.45));
+            lineBack.setAttribute('filter', 'url(#historyLinkGlow)');
+            linkLayer.appendChild(lineBack);
+
+            const line = document.createElementNS(NS, 'line');
+            line.setAttribute('x1', source.x);
+            line.setAttribute('y1', source.y);
+            line.setAttribute('x2', target.x);
+            line.setAttribute('y2', target.y);
+            line.setAttribute('stroke-width', String(linkWidth(Number(link.similarity || 0))));
+            line.setAttribute('stroke', emphasized ? 'rgba(160, 235, 255, 0.98)' : 'rgba(130, 178, 255, 0.52)');
+            line.setAttribute('stroke-linecap', 'round');
+            line.setAttribute('opacity', emphasized ? '1' : String(linkOpacity(Number(link.similarity || 0))));
+            linkLayer.appendChild(line);
+        });
+
+        nodes.forEach((node) => {
+            const isHovered = state.hoveredNodeId === node.id;
+            const neighborHighlight = state.hoveredNodeId && highlighted.has(node.id);
+            const radius = nodeRadius(node) * (isHovered ? 1.18 : 1);
+            const style = riskStyle(node);
+
+            const group = document.createElementNS(NS, 'g');
+            group.setAttribute('transform', `translate(${node.x} ${node.y})`);
+            group.setAttribute('class', 'history-graph-node');
+            group.dataset.nodeId = node.id;
+
+            const aura = document.createElementNS(NS, 'circle');
+            aura.setAttribute('r', String(radius + 12));
+            aura.setAttribute('fill', style.glow);
+            aura.setAttribute('opacity', isHovered ? '0.98' : (neighborHighlight ? '0.62' : '0.34'));
+            aura.setAttribute('filter', 'url(#historyNodeGlow)');
+            group.appendChild(aura);
+
+            const circle = document.createElementNS(NS, 'circle');
+            circle.setAttribute('r', String(radius));
+            circle.setAttribute('fill', style.fill);
+            circle.setAttribute('stroke', style.edge);
+            circle.setAttribute('stroke-width', String(1.2 + Math.max(0, Number(node.confidence || 0)) * 4.4));
+            circle.setAttribute('opacity', neighborHighlight || isHovered ? '1' : '0.94');
+            group.appendChild(circle);
+
+            const label = document.createElementNS(NS, 'text');
+            label.setAttribute('text-anchor', 'middle');
+            label.setAttribute('class', 'history-graph-node-label');
+            label.setAttribute('y', '6');
+            label.textContent = (node.nodeLabel || '案件').slice(0, 6);
+            group.appendChild(label);
+
+            const date = document.createElementNS(NS, 'text');
+            date.setAttribute('text-anchor', 'middle');
+            date.setAttribute('class', 'history-graph-node-date');
+            date.setAttribute('y', String(radius + 18));
+            date.textContent = String(node.createdAt || node.date || '').slice(5, 10);
+            group.appendChild(date);
+
+            group.addEventListener('pointerenter', (event) => {
+                state.hoveredNodeId = node.id;
+                draw();
+                showTooltip(node, event);
+            });
+            group.addEventListener('pointermove', (event) => {
+                if (state.hoveredNodeId === node.id) showTooltip(node, event);
+            });
+            group.addEventListener('pointerleave', () => {
+                state.hoveredNodeId = '';
+                draw();
+                hideTooltip();
+            });
+            group.addEventListener('click', () => {
+                window.location.href = `/histories/${node.historyId}`;
+            });
+            group.addEventListener('pointerdown', (event) => {
+                event.stopPropagation();
+                state.draggingNode = node;
+                node.fx = node.x;
+                node.fy = node.y;
+                state.pointerX = event.clientX;
+                state.pointerY = event.clientY;
+                group.setPointerCapture(event.pointerId);
+            });
+            group.addEventListener('pointerup', (event) => {
+                if (state.draggingNode === node) {
+                    node.fx = null;
+                    node.fy = null;
+                    state.draggingNode = null;
+                }
+                if (group.hasPointerCapture(event.pointerId)) {
+                    group.releasePointerCapture(event.pointerId);
+                }
+            });
+            group.addEventListener('pointermove', (event) => {
+                if (state.draggingNode !== node) return;
+                const dx = (event.clientX - state.pointerX) / state.scale;
+                const dy = (event.clientY - state.pointerY) / state.scale;
+                node.x += dx;
+                node.y += dy;
+                node.fx = node.x;
+                node.fy = node.y;
+                state.pointerX = event.clientX;
+                state.pointerY = event.clientY;
+                draw();
+                showTooltip(node, event);
+            });
+
+            nodeLayer.appendChild(group);
+        });
+    }
+
+    function tick() {
+        if (state.animationFrames < 520) {
+            nodes.forEach((node) => {
+                if (node.fx !== null && node.fy !== null) return;
+                node.vx *= 0.88;
+                node.vy *= 0.88;
+            });
+
+            for (let i = 0; i < nodes.length; i += 1) {
+                for (let j = i + 1; j < nodes.length; j += 1) {
+                    const left = nodes[i];
+                    const right = nodes[j];
+                    const dx = right.x - left.x;
+                    const dy = right.y - left.y;
+                    const distance = Math.max(32, Math.sqrt(dx * dx + dy * dy));
+                    const repel = 5200 / (distance * distance);
+                    const pushX = (dx / distance) * repel;
+                    const pushY = (dy / distance) * repel;
+                    left.vx -= pushX;
+                    left.vy -= pushY;
+                    right.vx += pushX;
+                    right.vy += pushY;
+                }
+            }
+
+            links.forEach((link) => {
+                const source = nodeById.get(link.source);
+                const target = nodeById.get(link.target);
+                if (!source || !target) return;
+                const dx = target.x - source.x;
+                const dy = target.y - source.y;
+                const distance = Math.max(28, Math.sqrt(dx * dx + dy * dy));
+                const desired = 460 - Math.min(180, Number(link.similarity || 0) * 190);
+                const force = (distance - desired) * 0.00075;
+                const pullX = dx * force;
+                const pullY = dy * force;
+                source.vx += pullX;
+                source.vy += pullY;
+                target.vx -= pullX;
+                target.vy -= pullY;
+            });
+
+            nodes.forEach((node, index) => {
+                const clusterPull = node.clusterKey ? 0.0016 : 0.001;
+                node.vx += (node.anchorX - node.x) * clusterPull;
+                node.vy += (node.anchorY - node.y) * clusterPull;
+                const centerPull = 0.00005 + (index % 4) * 0.00001;
+                node.vx += (centerX - node.x) * centerPull;
+                node.vy += (centerY - node.y) * centerPull;
+                node.x += node.vx;
+                node.y += node.vy;
+                node.x = Math.max(90, Math.min(width - 90, node.x));
+                node.y = Math.max(90, Math.min(height - 90, node.y));
+            });
+
+            draw();
+            state.animationFrames += 1;
+        }
+        requestAnimationFrame(tick);
+    }
+
+    stage.addEventListener('wheel', (event) => {
+        event.preventDefault();
+        const delta = event.deltaY < 0 ? 1.08 : 0.92;
+        state.scale = Math.max(0.55, Math.min(1.95, state.scale * delta));
+        applyViewport();
+    }, { passive: false });
+
+    stage.addEventListener('pointerdown', (event) => {
+        if (eventGraphNode(event.target)) return;
+        state.panning = true;
+        state.pointerX = event.clientX;
+        state.pointerY = event.clientY;
+        state.originX = state.x;
+        state.originY = state.y;
+        if (typeof stage.setPointerCapture === 'function') {
+            stage.setPointerCapture(event.pointerId);
+        }
+    });
+
+    stage.addEventListener('pointermove', (event) => {
+        if (!state.panning) return;
+        state.x = state.originX + (event.clientX - state.pointerX);
+        state.y = state.originY + (event.clientY - state.pointerY);
+        applyViewport();
+    });
+
+    stage.addEventListener('pointerup', (event) => {
+        state.panning = false;
+        if (typeof stage.hasPointerCapture === 'function' && stage.hasPointerCapture(event.pointerId)) {
+            stage.releasePointerCapture(event.pointerId);
+        }
+    });
+
+    seedStars(starsBack, 170, false);
+    seedStars(starsFront, 90, true);
+    applyViewport();
+    draw();
+    tick();
+})();
+</script>
+{% endif %}
+{% endblock %}

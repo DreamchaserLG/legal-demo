@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} | 登录{% endblock %}
+
+{% block content %}
+<section class="band auth-shell">
+    <div class="shell auth-grid">
+        <div class="hero-copy">
+            <p class="eyebrow">Sign In</p>
+            <h1>登录后保存案件历史，并恢复上次访问</h1>
+            <p class="hero-text">登录后，检索、分析和预测结果都会写入历史记录；会话未失效前，刷新页面仍可继续使用。</p>
+        </div>
+        <form class="tool-panel" method="post" action="/auth/login">
+            <input type="hidden" name="next" value="{{ next_url or '/' }}" />
+            <label for="login">用户名或邮箱</label>
+            <input id="login" name="login" type="text" value="{{ login_value or '' }}" required />
+            <label for="password">密码</label>
+            <input id="password" name="password" type="password" required />
+            {% if auth_error %}
+            <p class="notice-text">{{ auth_error }}</p>
+            {% endif %}
+            <div class="action-row">
+                <button type="submit">登录</button>
+                <a class="pager-link secondary" href="/register{% if next_url %}?next={{ next_url|urlencode }}{% endif %}">去注册</a>
+            </div>
+        </form>
+    </div>
+</section>
+{% endblock %}

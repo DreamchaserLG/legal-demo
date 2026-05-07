@@ -10,13 +10,15 @@
         >
             <div class="task-banner-head">
                 <div>
-                    <p class="eyebrow">Async Hydration</p>
-                    <h2>后台扩库任务</h2>
+                    <p class="eyebrow">资料更新</p>
+                    <h2>后台资料整理任务</h2>
                 </div>
                 <span class="task-status" data-task-status>{{ ingestion_task.status_label }}</span>
             </div>
-            <p class="task-copy" data-task-message>{{ ingestion_task.message or "后台任务已创建。" }}</p>
-            <p class="muted" data-task-count>累计处理 {{ ingestion_task.items_processed or 0 }} 条，当前本地命中 {{ ingestion_task.result_total_after or ingestion_task.current_local_count or 0 }} 条。</p>
+            <p class="task-copy" data-task-message>{{ ingestion_task.message or "任务已创建。" }}</p>
+            <p class="muted" data-task-count>
+                已处理 {{ ingestion_task.items_processed or 0 }} 条；当前本地命中 {{ ingestion_task.result_total_after or ingestion_task.current_local_count or 0 }} 条。
+            </p>
         </div>
     </div>
 </section>
@@ -42,8 +44,8 @@
             }
             const payload = await response.json();
             statusEl.textContent = payload.status_label || payload.status || '-';
-            messageEl.textContent = payload.message || '后台任务状态已更新。';
-            countEl.textContent = `累计处理 ${payload.items_processed || 0} 条，当前本地命中 ${payload.result_total_after || payload.current_local_count || 0} 条。`;
+            messageEl.textContent = payload.message || '任务状态已更新。';
+            countEl.textContent = `已处理 ${payload.items_processed || 0} 条；当前本地命中 ${payload.result_total_after || payload.current_local_count || 0} 条。`;
 
             if (payload.should_refresh && refreshUrl) {
                 window.location.replace(refreshUrl);

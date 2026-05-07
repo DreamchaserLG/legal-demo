@@ -1,4 +1,5 @@
-﻿import hashlib
+import hashlib
+import html
 import json
 import re
 from datetime import datetime
@@ -7,6 +8,38 @@ from email.utils import parsedate_to_datetime
 from sqlalchemy import text
 
 from app.core.database import engine
+
+_COMMON_MOJIBAKE_REPLACEMENTS = {
+    "â€™": "’",
+    "â€œ": "“",
+    "â€\x9d": "”",
+    "â€“": "–",
+    "â€”": "—",
+    "â€¦": "…",
+    "Â·": "·",
+    "Â§": "§",
+    "Â": "",
+    "鈥檚": "’s",
+    "鈥檛": "’t",
+    "鈥檇": "’d",
+    "鈥檒": "’ll",
+    "鈥檓": "’m",
+    "鈥檙": "’re",
+    "鈥檝": "’ve",
+    "鈥?": " — ",
+    "鈥�": " — ",
+}
+_MOJIBAKE_MARKERS = (
+    "\ufffd",
+    "鈥",
+    "â€",
+    "Ã",
+    "锟",
+    "鍏",
+    "妗",
+    "璇",
+    "棰",
+)
 
 
 def split_keywords(value: str | list[str]) -> list[str]:
@@ -22,14 +55,14 @@ def split_keywords(value: str | list[str]) -> list[str]:
     seen = set()
 
     for item in raw:
-        kw = str(item).strip()
-        if not kw:
+        keyword = repair_text(item)
+        if not keyword:
             continue
-        low = kw.lower()
-        if low in seen:
+        lowered = keyword.lower()
+        if lowered in seen:
             continue
-        seen.add(low)
-        result.append(kw)
+        seen.add(lowered)
+        result.append(keyword)
 
     return result
 
@@ -63,12 +96,60 @@ def parse_dt(value):
     return None
 
 
+def looks_mojibake(value: str | None) -> bool:
+    raw = str(value or "")
+    if not raw.strip():
+        return False
+    marker_hits = sum(raw.count(marker) for marker in _MOJIBAKE_MARKERS)
+    if marker_hits >= 2:
+        return True
+    if "\ufffd" in raw or "â€" in raw:
+        return True
+    return "鈥" in raw
+
+
+def repair_text(value: str | None) -> str:
+    raw = str(value or "")
+    if not raw:
+        return ""
+
+    text_value = html.unescape(raw.replace("\ufeff", ""))
+    text_value = text_value.replace("\r\n", "\n").replace("\r", "\n")
+    text_value = re.sub(r"(?i)<br\s*/?>", "\n", text_value)
+
+    for source, target in _COMMON_MOJIBAKE_REPLACEMENTS.items():
+        text_value = text_value.replace(source, target)
+
+    text_value = re.sub(r"\s+\n", "\n", text_value)
+    text_value = re.sub(r"\n{3,}", "\n\n", text_value)
+    text_value = re.sub(r"[ \t]{2,}", " ", text_value)
+    return text_value.strip()
+
+
+def repair_json_text(data):
+    if isinstance(data, dict):
+        return {key: repair_json_text(value) for key, value in data.items()}
+    if isinstance(data, list):
+        return [repair_json_text(item) for item in data]
+    if isinstance(data, str):
+        return repair_text(data)
+    return data
+
+
+def plain_text_preview(value: str | None) -> str:
+    text_value = repair_text(value)
+    if not text_value:
+        return ""
+    text_value = re.sub(r"<[^>]+>", " ", text_value)
+    return re.sub(r"\s+", " ", text_value).strip()
+
+
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def json_text(data) -> str:
-    return json.dumps(data, ensure_ascii=False, default=str)
+    return json.dumps(repair_json_text(data), ensure_ascii=False, default=str)
 
 
 def log_sync(source_code: str, status: str, message: str):
@@ -82,7 +163,7 @@ def log_sync(source_code: str, status: str, message: str):
             {
                 "source_code": source_code,
                 "status": status,
-                "message": message,
+                "message": repair_text(message),
             },
         )
 
@@ -97,6 +178,10 @@ def upsert_source_item(
     raw_text: str | None = None,
     raw_json: dict | list | None = None,
 ):
+    clean_title = repair_text(title)
+    clean_summary = repair_text(summary)
+    clean_raw_text = repair_text(raw_text)
+
     sql = """
     INSERT INTO source_items (
         source_code, source_uid, title, item_url, published_at,
@@ -124,15 +209,24 @@ def upsert_source_item(
             {
                 "source_code": source_code,
                 "source_uid": source_uid,
-                "title": title,
+                "title": clean_title,
                 "item_url": item_url,
                 "published_at": parse_dt(published_at),
-                "summary": summary,
-                "raw_text": raw_text,
+                "summary": clean_summary,
+                "raw_text": clean_raw_text,
                 "raw_json": json_text(raw_json or {}),
             },
         ).mappings().first()
-        return row["id"]
+        item_id = row["id"]
+
+    try:
+        from app.service.archive_service import safe_archive_source_item_by_id
+
+        safe_archive_source_item_by_id(item_id, archive_event="upsert")
+    except Exception:
+        pass
+
+    return item_id
 
 
 def replace_item_keywords(item_id: int, keywords: list[str]):
@@ -142,24 +236,27 @@ def replace_item_keywords(item_id: int, keywords: list[str]):
             text("DELETE FROM item_keywords WHERE item_id = :item_id"),
             {"item_id": item_id},
         )
-        for kw in clean_keywords:
+        for keyword in clean_keywords:
             conn.execute(
-                text("""
+                text(
+                    """
                     INSERT INTO item_keywords (item_id, keyword)
                     VALUES (:item_id, :keyword)
                     ON CONFLICT (item_id, keyword) DO NOTHING
-                """),
-                {"item_id": item_id, "keyword": kw},
+                    """
+                ),
+                {"item_id": item_id, "keyword": keyword},
             )
 
 
 def keyword_score(text_value: str, keywords: list[str], weight: int) -> int:
-    if not text_value:
+    preview_text = plain_text_preview(text_value)
+    if not preview_text:
         return 0
 
-    low = text_value.lower()
+    lowered = preview_text.lower()
     score = 0
-    for kw in keywords:
-        if kw.lower() in low:
+    for keyword in keywords:
+        if keyword.lower() in lowered:
             score += weight
     return score

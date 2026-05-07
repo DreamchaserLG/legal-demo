@@ -1,4 +1,4 @@
-﻿import ssl
+import ssl
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime

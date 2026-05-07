@@ -1,14 +1,3 @@
-'''
-
-@-*- coding: utf-8 -*-
-
-@ python：python 3.9
-
-@ 创建人员：lg
-
-@ 创建时间：2026/3/30
-
-'''
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, text
@@ -18,7 +7,7 @@ from app.core.config import settings
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,
-    future=True
+    future=True,
 )
 
 
